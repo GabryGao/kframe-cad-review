@@ -235,6 +235,13 @@
     setStep(2);
   }
 
+  function drawingFileKind(fileName) {
+    const name = String(fileName || '');
+    if (/\.dwg$/i.test(name)) return 'dwg';
+    if (/\.dxf$/i.test(name)) return 'dxf';
+    return '';
+  }
+
   async function handleFile(file) {
     if (!file || state.loading) return;
     setStep(1);
@@ -244,8 +251,10 @@
     state.importWorker = null;
     setMessage('<strong>Reading drawing locally…</strong><br>図面をローカルで読み込んでいます…', 'info');
     try {
+      const fileKind = drawingFileKind(file.name);
       if (/\.pdf$/i.test(file.name)) throw new Error('PDF wall recognition is not implemented yet. Use the original CAD DXF or DWG; renaming a PDF does not convert it. / PDFの壁認識は未実装です。元のCADのDXF・DWGを使用してください。拡張子の変更では変換できません。');
-      if (/\.dwg$/i.test(file.name)) {
+      if (!fileKind) throw new Error('Choose a DXF or DWG file. Other file types are not supported. / DXFまたはDWGファイルを選択してください。その他の形式には対応していません。');
+      if (fileKind === 'dwg') {
         if (location.protocol === 'file:') throw new Error('DWG needs the local HTTP website, not a file:// page.');
         const buffer = await file.arrayBuffer();
         if (version !== state.loadVersion) return;
