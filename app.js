@@ -2,7 +2,7 @@
   'use strict';
 
   const $ = id => document.getElementById(id);
-  const CASE_POLICY_ID = 'architectural-wall-placement-2026-10-28';
+  const CASE_POLICY_ID = 'architectural-wall-placement-2026-11-04-no-length-limit';
   const WALL_SOURCE_COLOR = '#d92d20';
   const canvas = $('drawing-canvas');
   const ctx = canvas.getContext('2d');
@@ -95,11 +95,13 @@
       includeDiagnostics: false,
       casePolicyId: CASE_POLICY_ID,
       casePolicyMeasurementStatus: millimeterCase ? 'applied-in-millimeters' : 'pending-drawing-unit-verification',
-      excludeAtOrBelowMinWallLen: millimeterCase,
+      minWallLen: 0,
+      minPairAspect: 0.01,
+      layerEvidenceMinOverlap: millimeterCase ? 200 : undefined,
+      excludeAtOrBelowMinWallLen: false,
       extractCompanionWallLayers: true,
     };
     if (options.unitsCode === 4 || state.paramsDirty) {
-      options.minWallLen = numberValue('min-wall-length');
       options.kLen = numberValue('kframe-length');
       options.pairMin = numberValue('pair-min');
       options.pairMax = numberValue('pair-max');
@@ -108,17 +110,13 @@
   }
 
   function validateParameters() {
-    const values = ['min-wall-length', 'kframe-length', 'pair-min', 'pair-max'].map(numberValue);
+    const values = ['kframe-length', 'pair-min', 'pair-max'].map(numberValue);
     if (values.some(value => !Number.isFinite(value) || value <= 0)) {
       setMessage('<strong>Every geometry parameter must be greater than zero.</strong><br>すべての形状パラメータには0より大きい値を入力してください。');
       return false;
     }
     if (numberValue('pair-min') >= numberValue('pair-max')) {
       setMessage('<strong>Minimum wall thickness must be smaller than the maximum.</strong><br>最小壁厚は最大壁厚より小さくしてください。');
-      return false;
-    }
-    if (state.inspection?.unitsCode === 4 && numberValue('min-wall-length') < 200) {
-      setMessage('<strong>This case omits wall spans of 200 mm or less.</strong><br>本案件では壁長200mm以下を省略します。主壁長は200mm以上にしてください。');
       return false;
     }
     if (state.inspection?.unitsCode === 4 && numberValue('pair-min') < 100) {
@@ -137,7 +135,7 @@
     clearPreparedDownload();
     updateViewOptions();
     if (state.inspection.unitsCode !== 4 && !state.paramsDirty) {
-      const controls = { 'min-wall-length': 'minWallLen', 'kframe-length': 'kLen', 'pair-min': 'pairMin', 'pair-max': 'pairMax' };
+      const controls = { 'kframe-length': 'kLen', 'pair-min': 'pairMin', 'pair-max': 'pairMax' };
       Object.entries(controls).forEach(([id, field]) => { $(id).value = Number(state.result.used[field].toPrecision(6)); });
     }
     const currentIds = new Set(state.result.placementCandidates.map(candidate => candidate.id));
@@ -215,7 +213,7 @@
     state.inspectedLayer = null;
     state.paramsDirty = false;
     state.viewScope = 'main';
-    ['min-wall-length', 'kframe-length', 'pair-min', 'pair-max'].forEach(id => {
+    ['kframe-length', 'pair-min', 'pair-max'].forEach(id => {
       $(id).value = $(id).defaultValue;
       $(id).closest('label').querySelector('em').textContent = inspection.unitsCode === 4 ? 'mm' : 'units / 図面単位';
     });
@@ -515,8 +513,8 @@
     renderPositionTable();
     const wallBoundaries=state.result.wallBoundarySegments || [];
     const unresolvedCount=state.result.wallCoverage?.unresolved?.length||0;
-    const omittedCount=state.result.wallCoverage?.omitted?.length||0;
-    $('review-summary').innerHTML = `<strong>${candidates.length} placement candidates · review required</strong><span>配置候補 ${candidates.length}件 · 高評価 ${high}件 · 壁輪郭線 ${wallBoundaries.length}本 · 壁中心線 ${walls.length}件 · 未確定 ${unresolvedCount}区間 · 200mm以下の省略 ${omittedCount}区間 · 構造モデル未検証</span>`;
+    const equipmentOutlineCount=state.result.equipmentReview?.outlines?.length||0;
+    $('review-summary').innerHTML = `<strong>${candidates.length} placement candidates · review required</strong><span>配置候補 ${candidates.length}件 · 高評価 ${high}件 · 壁輪郭線 ${wallBoundaries.length}本 · 壁中心線 ${walls.length}件 · 未確定 ${unresolvedCount}区間 · 設備外形の除外 ${equipmentOutlineCount}件 · 構造モデル未検証</span>`;
     $('existing-brace-count').textContent = state.result.existingKBraces.length
       ? `${state.result.existingKBraces.length} existing K-shaped brace assembly detected. / 既存K型筋違 ${state.result.existingKBraces.length}件を補助検出。`
       : 'No existing K-shaped brace detected. / 既存K型筋違は未検出です。';
@@ -971,15 +969,14 @@
     $('coverage-status').textContent=summary.visibleUnresolved||summary.visibleOmitted
       ? `Raw paired-edge diagnostics: ${summary.visibleUnresolved} fragments remain without paired-edge confirmation, not ${summary.visibleUnresolved} missing walls. Some support continuous references or provisional source-edge references; they remain uncertain in Source coverage and detailed exports. Completeness is not verified. / 配対診断：原線${summary.visibleUnresolved}区間は両側線の確認が未成立で、未検出の壁の本数ではありません。一部は連続基準線または片側原線の暫定基準として表示します。原線確認・詳細出力にも未確定として保持し、網羅性は未確認です。`
       : 'All selected-layer line intervals are accounted for geometrically; correctness is not certified. / 選択レイヤーの全線区間を形状として処理済みですが、正確性を保証するものではありません。';
-    if(summary.visibleOmitted)$('coverage-status').textContent+=` Case-specific omissions at or below 200 mm: ${summary.visibleOmitted}; coordinates and reasons remain in JSON. / 本案件ルールによる200mm以下の省略：${summary.visibleOmitted}区間。座標と理由はJSONに保持します。`;
     const visible=[...CADCORE.segmentsInBounds(unresolved,scopeBounds()),...CADCORE.segmentsInBounds(omitted,scopeBounds())];
     const reason = line => {
       const detail = LAYEREXPLANATIONS.unresolvedExplanation(line);
       return `${detail.cause.ja} ${detail.remedy.ja} / ${detail.cause.en} ${detail.remedy.en}`;
     };
-    $('coverage-reasons').innerHTML=['cross-layer-only','no-compatible-pair','below-main-span','at-or-below-case-minimum'].map(code=>{
+    $('coverage-reasons').innerHTML=['cross-layer-only','no-compatible-pair','below-main-span'].map(code=>{
       const group=visible.filter(s=>s.reasonCode===code);
-      const label=code==='cross-layer-only'?'Parallel lines on other Layers / 他レイヤーに平行線':code==='below-main-span'?'Short/detail intervals / 短線・詳細区間':code==='at-or-below-case-minimum'?'Omitted at or below 200 mm / 200mm以下で省略':'Unpaired intervals / 配対未成立';
+      const label=code==='cross-layer-only'?'Parallel lines on other Layers / 他レイヤーに平行線':code==='below-main-span'?'Short/detail intervals requiring evidence / 根拠確認が必要な短線・詳細区間':'Unpaired intervals / 配対未成立';
       return `<li>${label}: <strong>${group.length}</strong></li>`;
     }).join('');
     const examples=[...visible].sort((a,b)=>b.length-a.length).slice(0,12);
@@ -1392,7 +1389,7 @@
   $('zoom-out').addEventListener('click', () => { state.zoom = Math.max(0.3, state.zoom / 1.22); draw(); });
   $('fit-view').addEventListener('click', () => { resetView(); draw(); });
   ['show-original', 'show-wall', 'show-kframe', 'show-existing-braces', 'show-layer'].forEach(id => $(id).addEventListener('change', draw));
-  ['min-wall-length', 'kframe-length', 'pair-min', 'pair-max', 'require-pair'].forEach(id => $(id).addEventListener('input', () => { state.paramsDirty = true; }));
+  ['kframe-length', 'pair-min', 'pair-max', 'require-pair'].forEach(id => $(id).addEventListener('input', () => { state.paramsDirty = true; }));
   canvas.addEventListener('wheel', event => {
     if (!state.result) return;
     event.preventDefault();

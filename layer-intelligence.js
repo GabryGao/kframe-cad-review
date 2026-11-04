@@ -138,7 +138,9 @@
     const unitMode = options.unitsCode === 4 ? 'millimeters' : 'relative';
     const minSpacing = options.pairMin != null ? options.pairMin : unitMode === 'millimeters' ? 60 : ext.diag * 0.003;
     const maxSpacing = options.pairMax != null ? options.pairMax : unitMode === 'millimeters' ? 450 : ext.diag * 0.05;
-    const minOverlap = options.minWallLen != null ? options.minWallLen : unitMode === 'millimeters' ? 500 : ext.diag * 0.02;
+    const minOverlap = options.layerEvidenceMinOverlap != null ? options.layerEvidenceMinOverlap
+      : options.minWallLen != null ? options.minWallLen
+        : unitMode === 'millimeters' ? 500 : ext.diag * 0.02;
     const connectionTolerance = unitMode === 'millimeters' ? 120 : ext.diag * 0.012;
     const eligibleAll = Topology.runs(allSegments).map(normalizeSegment).filter(segment => segment.length >= minOverlap);
     const sampleStep = Math.max(1, Math.ceil(eligibleAll.length / 400));

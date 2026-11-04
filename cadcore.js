@@ -172,6 +172,7 @@
     const overlapEnd = Math.min(alen, Math.max(p1, p2));
     const overlap = overlapEnd - overlapStart;
     if (!meetsMinimumSpan(overlap, opts)) return null;
+    if (overlap <= thickness * Math.max(0, Number(opts.minPairAspect) || 0) + 1e-6) return null;
     const offsetX = nx * signedDistance / 2;
     const offsetY = ny * signedDistance / 2;
     return {
@@ -218,6 +219,7 @@
       pairMin: opts.pairMin != null ? opts.pairMin : (millimeterDrawing ? 60 : ext.diag * 0.003),
       pairMax: opts.pairMax != null ? opts.pairMax : (millimeterDrawing ? 450 : ext.diag * 0.035),
       angleTolerance: opts.angleTolerance != null ? opts.angleTolerance : 5,
+      minPairAspect: opts.minPairAspect != null ? opts.minPairAspect : 0,
       excludeAtOrBelowMinWallLen: !!opts.excludeAtOrBelowMinWallLen,
     };
     const normalized = (segments || [])
@@ -227,16 +229,32 @@
       .filter(segment => opts.selectedWallLayer || !["excluded", "brace", "column", "beam"].includes(layerRole(segment.layer)));
     const noisy = new Set(normalized.filter(segment => looksLikeRepeatedPattern(segment, normalized, settings)));
     const possiblePairs = [];
+    const continuationLength = (segment, interval) => Math.max(0, interval[0])
+      + Math.max(0, segment.length - interval[1]);
     for (let i = 0; i < normalized.length; i++) {
       if (noisy.has(normalized[i])) continue;
       for (let j = i + 1; j < normalized.length; j++) {
         if (noisy.has(normalized[j])) continue;
         const geometry = pairGeometry(normalized[i], normalized[j], settings);
         if (!geometry) continue;
-        possiblePairs.push({ i, j, geometry, score: geometry.overlap - geometry.thickness * 0.01 });
+        possiblePairs.push({
+          i, j, geometry,
+          boundaryContinuation: continuationLength(normalized[i], geometry.aInterval)
+            + continuationLength(normalized[j], geometry.bInterval),
+          score: geometry.overlap - geometry.thickness * 0.01,
+        });
       }
     }
-    possiblePairs.sort((a, b) => b.score - a.score);
+    possiblePairs.sort((a, b) => {
+      const sameSupportedSpan = Math.abs(a.geometry.overlap - b.geometry.overlap) <= 1e-6;
+      const wallLikeSpan = a.geometry.overlap >= a.geometry.thickness * 0.75
+        && b.geometry.overlap >= b.geometry.thickness * 0.75;
+      if (sameSupportedSpan && wallLikeSpan) {
+        const continuationDifference = b.boundaryContinuation - a.boundaryContinuation;
+        if (Math.abs(continuationDifference) > 1e-6) return continuationDifference;
+      }
+      return b.score - a.score;
+    });
     // A long edge can face several separate fragments. Reserve only the paired
     // interval, retaining every source gap and rejecting competing overlaps.
     const used = new Map();
@@ -512,6 +530,33 @@
     return result;
   }
 
+  function removeEmbeddedCrossSectionReferences(walls) {
+    const eps=1e-4, perpendicularTolerance=Math.sin(Math.PI/36);
+    const input=(walls||[]).filter(wall=>wall&&segLen(wall)>eps);
+    const width=wall=>Math.max(0,Number(wall.thickness)||0,
+      ...(wall.continuity?.originalGeometries||[]).map(item=>Number(item.thickness)||0));
+    return input.filter((candidate,index)=>{
+      const candidateLength=segLen(candidate),candidateWidth=width(candidate);
+      if(!candidateWidth||candidateLength>=candidateWidth-Math.max(2,candidateWidth*.01))return true;
+      const candidateUx=(candidate.x2-candidate.x1)/candidateLength;
+      const candidateUy=(candidate.y2-candidate.y1)/candidateLength;
+      const embedded=input.some((host,hostIndex)=>{
+        if(hostIndex===index)return false;
+        const hostLength=segLen(host),hostWidth=width(host);
+        if(!hostWidth||hostLength<candidateLength*1.5-eps)return false;
+        const hostUx=(host.x2-host.x1)/hostLength,hostUy=(host.y2-host.y1)/hostLength;
+        if(Math.abs(candidateUx*hostUx+candidateUy*hostUy)>perpendicularTolerance)return false;
+        const tolerance=Math.max(2,candidateWidth*.01,hostWidth*.01);
+        return [{x:candidate.x1,y:candidate.y1},{x:candidate.x2,y:candidate.y2}].every(point=>{
+          const dx=point.x-host.x1,dy=point.y-host.y1;
+          const along=dx*hostUx+dy*hostUy,lateral=Math.abs(-dx*hostUy+dy*hostUx);
+          return along>=-tolerance&&along<=hostLength+tolerance&&lateral<=hostWidth/2+tolerance;
+        });
+      });
+      return !embedded;
+    });
+  }
+
   // Reference-line simplification, separate from raw paired-edge diagnostics.
   // Never bridge by distance alone: two established portions must share the
   // SAME continuous source edge and have a connected opposing contour. Caps
@@ -633,16 +678,74 @@
           gaps:gaps.map(({source,span,length,opposingPath})=>({source,span,length,opposingPath}))}};
       replacement.set(indexes[0],ref);for(const i of indexes.slice(1))replacement.set(i,null);
     }
-    return walls.flatMap((w,i)=>replacement.has(i)?(replacement.get(i)?[replacement.get(i)]:[]):[w]);
+    const references=walls.flatMap((w,i)=>replacement.has(i)?(replacement.get(i)?[replacement.get(i)]:[]):[w]);
+    return removeEmbeddedCrossSectionReferences(references);
   }
 
   function deriveWallOutputSegments(segments, references) {
     const eps=1e-4, angleTolerance=Math.sin(Math.PI/36);
     const sourceMap=new Map(segments.filter(s=>s&&s.id).map(s=>[s.id,normalizedSegment(s)]));
-    const walls=(references||[]).filter(w=>w&&segLen(w)>eps), endpointCandidates=walls.map(()=>[[],[]]);
+    const referenceWalls=removeEmbeddedCrossSectionReferences(references);
     const thickness=wall=>Math.max(0,Number(wall.thickness)||0,
       ...(wall.continuity?.originalGeometries||[]).map(item=>Number(item.thickness)||0));
+    const axisShift=wall=>Math.max(0,Number(wall.continuity?.maxAxisShift)||0);
     const sourceIds=wall=>[...new Set([...(wall.sourceSegmentIds||[]),...(wall.supportingSourceSegmentIds||[])])];
+    // Align short interrupted portions to the longest reference on one uninterrupted source boundary.
+    // The adjusted axis must stay inside every original wall strip; openings are still governed by the gap rules below.
+    const alignSharedBoundaryReferences=input=>{
+      const proposals=new Map(),add=(index,item)=>{if(!proposals.has(index))proposals.set(index,[]);proposals.get(index).push(item);};
+      for(const source of sourceMap.values()) {
+        const sx=(source.x2-source.x1)/source.length,sy=(source.y2-source.y1)/source.length;
+        const entries=input.map((wall,index)=>{
+          if(!(wall.sourceSegmentIds||[]).includes(source.id))return null;
+          const length=segLen(wall),ux=(wall.x2-wall.x1)/length,uy=(wall.y2-wall.y1)/length;
+          if(Math.abs(ux*sy-uy*sx)>angleTolerance)return null;
+          const width=thickness(wall);if(!width)return null;
+          const midpoint={x:(wall.x1+wall.x2)/2,y:(wall.y1+wall.y2)/2};
+          const offset=-(midpoint.x-source.x1)*sy+(midpoint.y-source.y1)*sx;
+          const tolerance=Math.max(2,width*.01);
+          if(Math.abs(Math.abs(offset)-width/2)>Math.max(tolerance,width*.05))return null;
+          return {index,wall,width,offset,span:projectedInterval(source,wall)};
+        }).filter(Boolean).sort((a,b)=>a.span[0]-b.span[0]||a.span[1]-b.span[1]);
+        const groups=[];let group=[],hasGap=false,hasOffsetChange=false;
+        const flush=()=>{
+          const shortStep=group.length>=3&&group.some(item=>segLen(item.wall)<=item.width+Math.max(2,item.width*.01));
+          const alignContiguousSteps=!hasGap&&hasOffsetChange&&shortStep;
+          if(group.length>1&&(hasGap||alignContiguousSteps))groups.push({members:group,alignContiguousSteps});
+          group=[];hasGap=false;hasOffsetChange=false;
+        };
+        for(const entry of entries) {
+          if(!group.length){group=[entry];continue;}
+          const previous=group.at(-1),gap=entry.span[0]-previous.span[1],width=Math.max(previous.width,entry.width),
+            tolerance=Math.max(2,width*.01),sameSide=previous.offset*entry.offset>0,
+            compatibleOffset=Math.abs(previous.offset-entry.offset)<=width*.25+tolerance;
+          if(gap<=width*1.05+tolerance&&sameSide&&(compatibleOffset||gap<=eps)){
+            group.push(entry);if(gap>eps)hasGap=true;
+            if(Math.abs(previous.offset-entry.offset)>tolerance)hasOffsetChange=true;
+          }
+          else {flush();group=[entry];}
+        }
+        flush();
+        for(const {members,alignContiguousSteps} of groups) {
+          const anchor=[...members].sort((a,b)=>segLen(b.wall)-segLen(a.wall)||String(a.wall.id).localeCompare(String(b.wall.id)))[0];
+          const score=members.reduce((sum,item)=>sum+segLen(item.wall),0);
+          for(const member of members) {
+            const delta=anchor.offset-member.offset,width=Math.max(anchor.width,member.width),tolerance=Math.max(2,width*.01);
+            if((!alignContiguousSteps&&Math.abs(delta)>width*.25+tolerance)
+              ||anchor.offset*member.offset<=0||Math.abs(anchor.offset)>member.width+tolerance)continue;
+            add(member.index,{score,dx:-sy*delta,dy:sx*delta,distance:Math.abs(delta),sourceSegmentId:source.id});
+          }
+        }
+      }
+      return input.map((wall,index)=>{
+        const options=(proposals.get(index)||[]).sort((a,b)=>b.score-a.score||a.distance-b.distance);
+        if(!options.length||options[0].distance<=eps)return {...wall};
+        const shift=options[0];
+        return {...wall,x1:wall.x1+shift.dx,y1:wall.y1+shift.dy,x2:wall.x2+shift.dx,y2:wall.y2+shift.dy,
+          outputAxisShift:{distance:shift.distance,dx:shift.dx,dy:shift.dy,sourceSegmentId:shift.sourceSegmentId}};
+      });
+    };
+    const walls=alignSharedBoundaryReferences(referenceWalls),endpointCandidates=walls.map(()=>[[],[]]);
     const endpoints=segment=>[{x:segment.x1,y:segment.y1},{x:segment.x2,y:segment.y2}];
     const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
     const sourceJunctionSupported=(a,b,point,radius)=>{
@@ -653,6 +756,22 @@
         for(const p of endpoints(right))if(pointSegmentDistance(p,left)<=eps&&distance(p,point)<=radius)return true;
       }
       return false;
+    };
+    const sourceAxialReach=(wall,endIndex)=>{
+      const length=segLen(wall),ux=(wall.x2-wall.x1)/length,uy=(wall.y2-wall.y1)/length;
+      const width=thickness(wall),tolerance=Math.max(2,width*.01),limit=width/2+axisShift(wall)+tolerance;
+      let reach=0;
+      for(const id of sourceIds(wall)) {
+        const source=sourceMap.get(id);if(!source||source.length<=eps)continue;
+        const sx=(source.x2-source.x1)/source.length,sy=(source.y2-source.y1)/source.length;
+        if(Math.abs(ux*sy-uy*sx)>angleTolerance)continue;
+        const midpoint={x:(source.x1+source.x2)/2,y:(source.y1+source.y2)/2};
+        const lateral=Math.abs(-(midpoint.x-wall.x1)*uy+(midpoint.y-wall.y1)*ux);
+        if(width&&lateral>limit)continue;
+        const positions=endpoints(source).map(point=>(point.x-wall.x1)*ux+(point.y-wall.y1)*uy);
+        reach=Math.max(reach,endIndex===0?Math.max(0,-Math.min(...positions)):Math.max(0,Math.max(...positions)-length));
+      }
+      return reach;
     };
     const addCandidate=(wallIndex,endIndex,point,otherIndex,kind)=>{
       const wall=walls[wallIndex],start=endIndex===0?{x:wall.x1,y:wall.y1}:{x:wall.x2,y:wall.y2};
@@ -670,11 +789,20 @@
         const dx=b.x1-a.x1,dy=b.y1-a.y1;
         const alongA=(dx*ub.y-dy*ub.x)/cross,alongB=(dx*ua.y-dy*ua.x)/cross;
         const point={x:a.x1+alongA*ua.x,y:a.y1+alongA*ua.y};
-        const tolerance=Math.max(2,largest*.01),reachA=widthB/2+tolerance,reachB=widthA/2+tolerance;
-        if(alongA<-reachA||alongA>lengthA+reachA||alongB<-reachB||alongB>lengthB+reachB)continue;
+        const tolerance=Math.max(2,largest*.01),baseReachA=widthB/2+axisShift(b)+tolerance,
+          baseReachB=widthA/2+axisShift(a)+tolerance,
+          sourceLimitA=widthA+widthB/2+axisShift(a)+axisShift(b)+tolerance,
+          sourceLimitB=widthB+widthA/2+axisShift(a)+axisShift(b)+tolerance,
+          reachA=[Math.max(baseReachA,Math.min(sourceLimitA,sourceAxialReach(a,0))),
+            Math.max(baseReachA,Math.min(sourceLimitA,sourceAxialReach(a,1)))],
+          reachB=[Math.max(baseReachB,Math.min(sourceLimitB,sourceAxialReach(b,0))),
+            Math.max(baseReachB,Math.min(sourceLimitB,sourceAxialReach(b,1)))];
+        if(alongA<-reachA[0]||alongA>lengthA+reachA[1]||alongB<-reachB[0]||alongB>lengthB+reachB[1])continue;
         const candidates=[];
-        for(const [endIndex,position] of [[0,0],[1,lengthA]])if(Math.abs(alongA-position)<=reachA)candidates.push([i,endIndex]);
-        for(const [endIndex,position] of [[0,0],[1,lengthB]])if(Math.abs(alongB-position)<=reachB)candidates.push([j,endIndex]);
+        if(alongA<-eps&&-alongA<=reachA[0])candidates.push([i,0]);
+        else if(alongA>lengthA+eps&&alongA-lengthA<=reachA[1])candidates.push([i,1]);
+        if(alongB<-eps&&-alongB<=reachB[0])candidates.push([j,0]);
+        else if(alongB>lengthB+eps&&alongB-lengthB<=reachB[1])candidates.push([j,1]);
         if(!candidates.length||!sourceJunctionSupported(a,b,point,largest*2+tolerance))continue;
         for(const [wallIndex,endIndex] of candidates)addCandidate(wallIndex,endIndex,point,wallIndex===i?j:i,'orthogonal-junction');
         continue;
@@ -690,6 +818,33 @@
       if(!sourceJunctionSupported(a,b,point,largest*2+tolerance))continue;
       addCandidate(i,nearest.endA,point,j,'aligned-junction');
       addCandidate(j,nearest.endB,point,i,'aligned-junction');
+    }
+    const junctionItems=[];
+    for(let wallIndex=0;wallIndex<walls.length;wallIndex++)for(let endIndex=0;endIndex<2;endIndex++)
+      for(const item of endpointCandidates[wallIndex][endIndex])junctionItems.push({item,wallIndex,endIndex});
+    const parents=junctionItems.map((_,index)=>index),find=index=>parents[index]===index?index:(parents[index]=find(parents[index]));
+    const join=(left,right)=>{left=find(left);right=find(right);if(left!==right)parents[right]=left;};
+    for(let i=0;i<junctionItems.length;i++)for(let j=i+1;j<junctionItems.length;j++) {
+      const a=junctionItems[i],b=junctionItems[j],aWalls=new Set([a.wallIndex,a.item.otherIndex]);
+      if(![b.wallIndex,b.item.otherIndex].some(index=>aWalls.has(index)))continue;
+      const indexes=[a.wallIndex,a.item.otherIndex,b.wallIndex,b.item.otherIndex];
+      const shift=Math.max(...indexes.map(index=>axisShift(walls[index]))),width=Math.max(...indexes.map(index=>thickness(walls[index])));
+      if(!shift||distance(a.item.point,b.item.point)>shift+Math.max(2,width*.01))continue;
+      join(i,j);
+    }
+    const junctionGroups=new Map();
+    for(let index=0;index<junctionItems.length;index++) {
+      const root=find(index);if(!junctionGroups.has(root))junctionGroups.set(root,[]);junctionGroups.get(root).push(junctionItems[index]);
+    }
+    for(const group of junctionGroups.values()) {
+      const points=new Map(group.map(({item})=>[`${Math.round(item.point.x/eps)}:${Math.round(item.point.y/eps)}`,item.point]));
+      if(points.size<2)continue;
+      const values=[...points.values()],point={x:values.reduce((sum,item)=>sum+item.x,0)/values.length,
+        y:values.reduce((sum,item)=>sum+item.y,0)/values.length};
+      for(const {item,wallIndex,endIndex} of group) {
+        const wall=walls[wallIndex],start=endIndex===0?{x:wall.x1,y:wall.y1}:{x:wall.x2,y:wall.y2};
+        item.point=point;item.gap=distance(start,point);
+      }
     }
     const connectors=[],seen=new Set(),coord=value=>Math.round(value/eps);
     for(let wallIndex=0;wallIndex<walls.length;wallIndex++)for(let endIndex=0;endIndex<2;endIndex++) {
@@ -767,8 +922,22 @@
           &&Math.abs(pointSegmentDistance(nearest.pointA,source)-widthA/2)<=tolerance
           &&Math.abs(pointSegmentDistance(nearest.pointB,source)-widthB/2)<=tolerance;
       });
+      const alignedTransitionSources=sharedSources.filter(id=>{
+        const source=sourceMap.get(id),sx=(source.x2-source.x1)/source.length,sy=(source.y2-source.y1)/source.length;
+        const signedOffset=point=>-(point.x-source.x1)*sy+(point.y-source.y1)*sx;
+        const offsetA=signedOffset(nearest.pointA),offsetB=signedOffset(nearest.pointB);
+        return offsetA*offsetB>0&&Math.abs(offsetA)<=widthA+tolerance&&Math.abs(offsetB)<=widthB+tolerance;
+      });
+      if(nearest&&(a.outputAxisShift||b.outputAxisShift)&&overlap<=tolerance&&longitudinalGap<=tolerance
+        &&along<=tolerance&&lateral>eps&&nearest.gap<=width*1.05+tolerance&&alignedTransitionSources.length
+        &&!gapCovered(a,b,nearest.pointA,nearest.pointB,width)) {
+        continuityCandidates.push({a,b,endA:nearest.endA,endB:nearest.endB,start:nearest.pointA,end:nearest.pointB,
+          gap:nearest.gap,sharedSources:alignedTransitionSources,kind:'shared-source-aligned-transition',
+          evidence:['both adjusted wall references remain inside the same uninterrupted source wall strip','the shared endpoint receives one explicit transition between the retained axes']});
+        continue;
+      }
       if(widthA&&widthB&&nearest&&expectedShift>tolerance&&overlap<=tolerance
-        &&longitudinalGap<=width*.25+tolerance&&along<=width*.25+tolerance
+        &&longitudinalGap<=width*1.05+tolerance&&along<=width*1.05+tolerance
         &&Math.abs(lateral-expectedShift)<=tolerance&&transitionSources.length
         &&!gapCovered(a,b,nearest.pointA,nearest.pointB,width)) {
         continuityCandidates.push({a,b,endA:nearest.endA,endB:nearest.endB,start:nearest.pointA,end:nearest.pointB,
@@ -1245,6 +1414,48 @@
         :'No explicit PS label was found. No automatic thin-wall exception was applied.'};
   }
 
+  function detectEquipmentOutlines(entities, segments, options) {
+    const opts=options||{},markerTypes=new Set(['TEXT','MTEXT','ATTRIB','ATTDEF']);
+    const ext=extentsOf(segments||[]),maxSpan=opts.unitsCode===4?3000:Math.max(1,ext.diag*.02),eps=Math.max(1e-4,maxSpan*1e-8);
+    const labels=(entities||[]).filter(entity=>markerTypes.has(entity.type)&&/(室内機|室外機|空調機|エアコン)/.test(String(entity.text||'')))
+      .flatMap((entity,index)=>{
+        const x=Number.isFinite(entity.x1)?entity.x1:entity.cx,y=Number.isFinite(entity.y1)?entity.y1:entity.cy;
+        return Number.isFinite(x)&&Number.isFinite(y)?[{id:`equipment-label-${index+1}`,text:String(entity.text),layer:entity.layer||'0',x,y}]:[];
+      });
+    const close=(a,b)=>Math.abs(a-b)<=eps,outlines=[];
+    for(const label of labels) {
+      const local=(segments||[]).filter(segment=>segment.layer===label.layer
+        &&Math.max(segment.x1,segment.x2)>=label.x-maxSpan&&Math.min(segment.x1,segment.x2)<=label.x+maxSpan
+        &&Math.max(segment.y1,segment.y2)>=label.y-maxSpan&&Math.min(segment.y1,segment.y2)<=label.y+maxSpan);
+      const horizontal=local.filter(segment=>close(segment.y1,segment.y2)
+        &&Math.min(segment.x1,segment.x2)<label.x-eps&&Math.max(segment.x1,segment.x2)>label.x+eps);
+      const vertical=local.filter(segment=>close(segment.x1,segment.x2)
+        &&Math.min(segment.y1,segment.y2)<label.y-eps&&Math.max(segment.y1,segment.y2)>label.y+eps);
+      const boxes=[];
+      for(const left of vertical)for(const right of vertical) {
+        const minx=left.x1,maxx=right.x1;if(minx>=label.x-eps||maxx<=label.x+eps||maxx-minx>maxSpan)continue;
+        const leftY=[left.y1,left.y2].sort((a,b)=>a-b),rightY=[right.y1,right.y2].sort((a,b)=>a-b);
+        if(!close(leftY[0],rightY[0])||!close(leftY[1],rightY[1])||leftY[1]-leftY[0]>maxSpan)continue;
+        const bottom=horizontal.find(segment=>close(segment.y1,leftY[0])
+          &&close(Math.min(segment.x1,segment.x2),minx)&&close(Math.max(segment.x1,segment.x2),maxx));
+        const top=horizontal.find(segment=>close(segment.y1,leftY[1])
+          &&close(Math.min(segment.x1,segment.x2),minx)&&close(Math.max(segment.x1,segment.x2),maxx));
+        if(!bottom||!top)continue;
+        boxes.push({labelId:label.id,label:label.text,layer:label.layer,
+          bounds:{minx,miny:leftY[0],maxx,maxy:leftY[1]},
+          sourceSegmentIds:[left.id,right.id,bottom.id,top.id],area:(maxx-minx)*(leftY[1]-leftY[0])});
+      }
+      boxes.sort((a,b)=>a.area-b.area);if(boxes[0])outlines.push(boxes[0]);
+    }
+    const unique=[],seen=new Set();
+    for(const outline of outlines) {
+      const key=[...outline.sourceSegmentIds].sort().join('|');if(seen.has(key))continue;seen.add(key);unique.push(outline);
+    }
+    return {status:unique.length?'excluded-from-wall-analysis':'not-found',outlines:unique,
+      sourceSegmentIds:[...new Set(unique.flatMap(outline=>outline.sourceSegmentIds))],
+      note:'Closed equipment outlines are excluded only when a matching equipment label lies inside the same-layer rectangle.'};
+  }
+
   // opts: {minWallLen, kLen, requirePair, pairMin, pairMax, excludeAtOrBelowMinWallLen}
   function classify(ents, opts) {
     opts = opts || {};
@@ -1277,10 +1488,13 @@
     const pairMin = opts.pairMin != null ? opts.pairMin : (millimeterDrawing ? 60 : ext.diag * 0.003);
     const pairMax = opts.pairMax != null ? opts.pairMax : (millimeterDrawing ? 450 : ext.diag * 0.035);
     const excludeAtOrBelowMinWallLen=!!opts.excludeAtOrBelowMinWallLen;
-    const extractionOptions={minWallLen,pairMin,pairMax,excludeAtOrBelowMinWallLen};
+    const minPairAspect=opts.minPairAspect!=null?opts.minPairAspect:0;
+    const extractionOptions={minWallLen,pairMin,pairMax,minPairAspect,excludeAtOrBelowMinWallLen};
+    const equipmentReview=detectEquipmentOutlines(ents,originalSegs,{unitsCode:opts.unitsCode||0});
+    const equipmentSourceIds=new Set(equipmentReview.sourceSegmentIds),wallSourceSegs=originalSegs.filter(segment=>!equipmentSourceIds.has(segment.id));
 
     // All-layer geometry is optional diagnostics; the browser only extracts selected Layers.
-    const rawWallCandidates = opts.includeDiagnostics === false ? [] : extractWallCenterlines(originalSegs, {
+    const rawWallCandidates = opts.includeDiagnostics === false ? [] : extractWallCenterlines(wallSourceSegs, {
       ...extractionOptions, requirePair, unitsCode: opts.unitsCode || 0,
     });
     const rawPlacementCandidates = detectPlacementCandidates(rawWallCandidates, { ...opts, kLen, unitsCode: opts.unitsCode || 0 });
@@ -1295,30 +1509,30 @@
         };
     const selectedWallLayers = layerAnalysis.selectedWallLayers || [];
     let selectedWallCandidates = selectedWallLayers.flatMap(layer => extractWallCenterlines(
-      originalSegs.filter(segment => (segment.layer || "0") === layer), {
+      wallSourceSegs.filter(segment => (segment.layer || "0") === layer), {
         ...extractionOptions, requirePair: true, unitsCode: opts.unitsCode || 0, selectedWallLayer: true, recoverConnectedShorts: true,
       }).map(wall => ({ ...wall, sourceLayers: [layer] }))
     ).map((wall, index) => ({ ...wall, id: `wall-${index + 1}` }));
     const recoveryOptions={...extractionOptions,layerAssessments:layerAnalysis.layers,
       extractCompanionWallLayers:!!opts.extractCompanionWallLayers};
-    selectedWallCandidates=recoverContextWallPairs(originalSegs,selectedWallCandidates,selectedWallLayers,recoveryOptions);
-    selectedWallCandidates=recoverCompanionWallLayerPairs(originalSegs,selectedWallCandidates,selectedWallLayers,recoveryOptions);
+    selectedWallCandidates=recoverContextWallPairs(wallSourceSegs,selectedWallCandidates,selectedWallLayers,recoveryOptions);
+    selectedWallCandidates=recoverCompanionWallLayerPairs(wallSourceSegs,selectedWallCandidates,selectedWallLayers,recoveryOptions);
     const extractedWallLayers=[...new Set([...selectedWallLayers,...selectedWallCandidates.flatMap(w=>w.sourceLayers||[w.layer]).filter(Boolean)])];
-    selectedWallCandidates=recoverResidualWallPairs(originalSegs,selectedWallCandidates,extractedWallLayers,extractionOptions);
+    selectedWallCandidates=recoverResidualWallPairs(wallSourceSegs,selectedWallCandidates,extractedWallLayers,extractionOptions);
     // Pair/context recovery has priority. Unpaired references must never reserve
     // source edges before their opposing boundary has been examined.
-    const wallCoverage=reviewWallCoverage(originalSegs,selectedWallCandidates,extractedWallLayers,extractionOptions);
+    const wallCoverage=reviewWallCoverage(wallSourceSegs,selectedWallCandidates,extractedWallLayers,extractionOptions);
     const represented=new Set([
       ...selectedWallCandidates.flatMap(w=>w.sourceSegmentIds||[]),
       ...wallCoverage.boundaryDetails.map(s=>s.sourceSegmentId),
     ]);
     const singleReferences=requirePair?[]:extractedWallLayers.flatMap(layer=>extractWallCenterlines(
-      originalSegs.filter(s=>s.layer===layer),{...extractionOptions,requirePair:false,selectedWallLayer:true,unitsCode:opts.unitsCode||0}
+      wallSourceSegs.filter(s=>s.layer===layer),{...extractionOptions,requirePair:false,selectedWallLayer:true,unitsCode:opts.unitsCode||0}
     ).filter(w=>w.centerlineBasis==='single-edge-hypothesis'&&!w.sourceSegmentIds.some(id=>represented.has(id))))
       .map((w,i)=>({...w,id:`reference-single-${i+1}`,sourceLayers:[w.layer]}));
     const supported = layerAnalysis.status === "selected" && selectedWallCandidates.length > 0;
-    const wallReferences = [...deriveWallReferences(originalSegs,selectedWallCandidates),...(supported?singleReferences:[])];
-    const wallOutputSegments = deriveWallOutputSegments(originalSegs,wallReferences);
+    const wallReferences = [...deriveWallReferences(wallSourceSegs,selectedWallCandidates),...(supported?singleReferences:[])];
+    const wallOutputSegments = deriveWallOutputSegments(wallSourceSegs,wallReferences);
     const wallLayerAssessments = new Map((layerAnalysis.layers || []).map(layer => [layer.name, layer]));
     const wallBoundaryLayers = [...new Set([
       ...extractedWallLayers,
@@ -1328,7 +1542,7 @@
       }),
     ])];
     const wallBoundaryLayerSet = new Set(wallBoundaryLayers);
-    const wallBoundarySegments = originalSegs.filter(segment => wallBoundaryLayerSet.has(segment.layer));
+    const wallBoundarySegments = wallSourceSegs.filter(segment => wallBoundaryLayerSet.has(segment.layer));
     const selectedPlacementCandidates = detectPlacementCandidates(selectedWallCandidates, {
       ...opts, kLen, unitsCode: opts.unitsCode || 0,
     });
@@ -1371,7 +1585,9 @@
       id:opts.casePolicyId,scope:'case-specific',measurementStatus:opts.casePolicyMeasurementStatus||'unknown',
       wallThickness:{minimum:pairMin,inclusive:true,units:millimeterDrawing?'mm':'drawing-units',
         psException:{allowedOnlyWithExplicitEvidence:true,automaticAcceptance:false,reviewStatus:psReview.status}},
-      wallLength:{omitAtOrBelow:minWallLen,inclusive:true,mergeContinuousSourceEntitiesBeforeFiltering:true},
+      wallLength:excludeAtOrBelowMinWallLen
+        ?{omitAtOrBelow:minWallLen,inclusive:true,omissionByLength:true,mergeContinuousSourceEntitiesBeforeFiltering:true}
+        :{omitAtOrBelow:null,inclusive:false,omissionByLength:false,lengthAloneDoesNotReject:true,mergeContinuousSourceEntitiesBeforePairing:true},
       openings:{bridgeRealOpenings:false,sourceGapsPreserved:true},
       centerline:{basis:'wall-centerline',preserveOpeningSideEndpoints:true,axisMovementMustRemainInsideSourceWall:true},
       universalDesignStandard:false,
@@ -1393,11 +1609,11 @@
       wallReferences, wallOutputSegments, wallBoundaryLayers, wallBoundarySegments,
       rawWallCandidates, rawPlacementCandidates, drawingAssessment,
       layerAnalysis, selectedWallLayers,extractedWallLayers,
-      wallCoverage,casePolicy,psReview,structuralModelVerification,completionReview,
+      wallCoverage,casePolicy,psReview,equipmentReview,structuralModelVerification,completionReview,
       placementCandidates, existingKBraces,
       kframe, kframeCandidates, extents: ext, viewAssessment,
       regions: drawingRegions(wallCandidates, Math.max(pairMax * 4, minWallLen * 3)),
-      used: { minWallLen, kLen, requirePair, pairMin, pairMax,excludeAtOrBelowMinWallLen,
+      used: { minWallLen, kLen, requirePair, pairMin, pairMax,minPairAspect,excludeAtOrBelowMinWallLen,
         extractCompanionWallLayers:!!opts.extractCompanionWallLayers,
         casePolicyId:opts.casePolicyId||null,unitsCode: opts.unitsCode || 0 },
       stats: {
@@ -1409,6 +1625,8 @@
         wallOutputSegs: wallOutputSegments.length,
         wallJunctionSegs: wallOutputSegments.filter(segment=>segment.outputRole==='junction-connector').length,
         wallBoundarySegs: wallBoundarySegments.length,
+        excludedEquipmentOutlines: equipmentReview.outlines.length,
+        excludedEquipmentSegs: equipmentReview.sourceSegmentIds.length,
         kframeSegs: placementCandidates.length,
         kframeAssemblies: existingKBraces.length,
         placementCandidates: placementCandidates.length,
@@ -1426,6 +1644,7 @@
       algorithmVersion: analysis && analysis.algorithmVersion || "layer-intelligence-1.0-preview",
       casePolicy: result && result.casePolicy || null,
       psReview: result && result.psReview || null,
+      equipmentReview: result && result.equipmentReview || null,
       structuralModelVerification: result && result.structuralModelVerification || {status:'not-performed'},
       completionReview: result && result.completionReview || {status:'review-required',reasons:['structural-model-verification-not-performed']},
       selectedWallLayers: [...(result && result.selectedWallLayers || [])],
@@ -1470,6 +1689,8 @@
         centerlineBasis: segment.centerlineBasis || null,
         connectedWallIds: segment.connectedWallIds || [],
         sourceSegmentIds: segment.sourceSegmentIds || [],
+        connectorKind: segment.connectorKind || null,
+        outputAxisShift: segment.outputAxisShift || null,
         geometry: { x1: segment.x1, y1: segment.y1, x2: segment.x2, y2: segment.y2 },
       })),
       source: {
@@ -1697,7 +1918,7 @@
     return L.join("\n") + "\n";
   }
 
-  const api = { inspectDXF, parseDXF, segsOf, segLen, classify, extractWallCenterlines, recoverContextWallPairs, recoverCompanionWallLayerPairs, recoverResidualWallPairs, deriveWallReferences, deriveWallOutputSegments, reviewWallCoverage, segmentsInBounds, detectPsReview, detectPlacementCandidates, detectKFrames, layerRole, summarizeLayers, buildAnnotationData, buildDXF, buildSelectedLayerDXF, buildCoverageDXF, makeSampleDXF, extentsOf, REMOVE_TYPES };
+  const api = { inspectDXF, parseDXF, segsOf, segLen, classify, extractWallCenterlines, recoverContextWallPairs, recoverCompanionWallLayerPairs, recoverResidualWallPairs, deriveWallReferences, deriveWallOutputSegments, reviewWallCoverage, segmentsInBounds, detectPsReview, detectEquipmentOutlines, detectPlacementCandidates, detectKFrames, layerRole, summarizeLayers, buildAnnotationData, buildDXF, buildSelectedLayerDXF, buildCoverageDXF, makeSampleDXF, extentsOf, REMOVE_TYPES };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.CADCORE = api;
 })(typeof window !== "undefined" ? window : globalThis);

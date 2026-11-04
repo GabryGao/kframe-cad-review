@@ -115,6 +115,8 @@
     const selected = payload.selectedWallLayers || [], walls = payload.wallCenterlines || [];
     const unresolved = payload.wallCoverage?.unresolved;
     const omitted = payload.wallCoverage?.omitted || [];
+    const lengthRule = payload.casePolicy?.wallLength;
+    const lengthOmission = lengthRule?.omissionByLength === true || Number.isFinite(lengthRule?.omitAtOrBelow);
     const lines = ['CAD図面 解析レポート / CAD drawing analysis report', ''];
     const add = (...values) => lines.push(...values.map(reportText));
     const paragraph = (ja, en) => add(ja, en, '');
@@ -134,10 +136,18 @@
       : 'No wall layer could be determined. This does not mean there are no walls.');
     add(`評価したレイヤー：${layers.length}層 / Assessed layers: ${layers.length}`,
       `抽出した中心線：${walls.length}本 / Extracted centerline segments: ${walls.length}`,
-      `本案件ルールで省略：${omitted.length}区間 / Omitted by the case-specific length rule: ${omitted.length}`);
-    if(payload.casePolicy)paragraph(
-      `本案件の条件：壁厚100mm以上（100mmを含む）、壁長200mm以下は省略（200mmを含む）。PSの薄壁例外は文字位置だけでは自動適用せず、囲い各辺の確認が必要です。`,
-      `Case-specific conditions: wall thickness at least 100 mm (inclusive); wall spans 200 mm or shorter are omitted (inclusive). A thin PS-wall exception is never applied from a label alone; every enclosure side requires review.`);
+      lengthOmission?`本案件ルールで省略：${omitted.length}区間 / Omitted by the case-specific length rule: ${omitted.length}`
+        :'壁長だけによる自動省略：なし / No automatic omission based on wall length alone');
+    if(payload.casePolicy)paragraph(lengthOmission
+      ?`本案件の条件：壁厚100mm以上（100mmを含む）。指定された壁長以下は省略します。PSの薄壁例外は文字位置だけでは自動適用せず、囲い各辺の確認が必要です。`
+      :'本案件の条件：壁厚100mm以上（100mmを含む）。壁長だけを理由に省略せず、短い区間も双線輪郭と接続根拠で判断します。PSの薄壁例外は文字位置だけでは自動適用しません。',
+      lengthOmission
+        ?'Case-specific conditions: wall thickness at least 100 mm (inclusive). Spans at or below the configured wall-length limit are omitted. A thin PS-wall exception is never applied from a label alone.'
+        :'Case-specific conditions: wall thickness at least 100 mm (inclusive). Wall length alone does not exclude a span; short intervals still require paired-outline and connection evidence. A thin PS-wall exception is never applied from a label alone.');
+    const equipmentOutlines=payload.equipmentReview?.outlines||[];
+    if(equipmentOutlines.length)paragraph(
+      `設備文字を内包する閉じた外形${equipmentOutlines.length}件を壁抽出から除外しました。元図には残し、JSONに外形座標と元線IDを記録します。`,
+      `${equipmentOutlines.length} closed outlines containing equipment labels were excluded from wall extraction. They remain in the source drawing and their bounds and source IDs are retained in JSON.`);
     const reconstructed=walls.filter(w=>w.centerlineBasis==='boundary-continuity-reference');
     if(reconstructed.length)paragraph(`うち${reconstructed.length}本は連続する両側の原線に基づく簡略基準線です。局所的な壁厚変化を単線化しており、厳密な中心線ではありません。以下の未確定原線数は統合前の配対診断で、未検出の壁の数ではありません。`,
       `${reconstructed.length} are simplified references supported by continuous source boundaries on both sides, not exact centerlines. Unresolved source counts below are pre-reconstruction pair diagnostics, not missing-wall counts.`);

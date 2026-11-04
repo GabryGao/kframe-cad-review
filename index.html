@@ -214,10 +214,9 @@
       </details>
 
       <details class="flow-disclosure" id="geometry-options"><summary>Advanced geometry settings / 詳細な形状設定</summary><div class="disclosure-content">
-        <div class="analysis-note case-policy-note"><strong>Case-specific input policy / 本案件専用の入力条件</strong><p>Normal walls: thickness ≥100 mm. Wall spans ≤200 mm are omitted after continuous CAD fragments are merged. Thin PS enclosure walls require explicit, side-by-side manual evidence; a PS label alone does not accept them.</p><p>通常壁は100mm以上。連続するCAD分割片を統合した後、200mm以下の壁長を省略します。100mm未満のPS囲いは、PS文字だけで自動採用せず、各辺の根拠を手動確認します。他案件の一般基準ではありません。</p></div>
+        <div class="analysis-note case-policy-note"><strong>Case-specific input policy / 本案件専用の入力条件</strong><p>Normal walls: thickness ≥100 mm. Wall length alone is not an exclusion criterion; short spans still require reliable paired outlines and connection evidence. Thin PS enclosure walls require explicit, side-by-side manual evidence; a PS label alone does not accept them.</p><p>通常壁は100mm以上。壁長だけを理由に省略せず、短い区間も双線輪郭と接続根拠で判断します。100mm未満のPS囲いは、PS文字だけで自動採用せず、各辺の根拠を手動確認します。他案件の一般基準ではありません。</p></div>
         <p>Automatic analysis has already used these case defaults.<br>本案件の初期値による自動解析は完了しています。</p>
         <div class="parameter-grid">
-          <label>Omit at or below <small>この長さ以下を省略</small><input id="min-wall-length" type="number" min="200" step="10" value="200"><em>mm</em></label>
           <label>K-frame clear span <small>K型の必要長</small><input id="kframe-length" type="number" min="1" step="100" value="1400"><em>mm</em></label>
           <label>Wall thickness min <small>最小壁厚（100mmを含む）</small><input id="pair-min" type="number" min="100" step="10" value="100"><em>mm</em></label>
           <label>Wall thickness max <small>最大壁厚</small><input id="pair-max" type="number" min="1" step="10" value="450"><em>mm</em></label>
@@ -286,13 +285,13 @@
   </div>
 
   <script src="segment-topology.js?v=20261028-companion-wall-pairs-1"></script>
-  <script src="layer-intelligence.js?v=20261028-companion-wall-pairs-1"></script>
+  <script src="layer-intelligence.js?v=20261104-no-length-equipment-corners-1"></script>
   <script src="grid-references.js?v=20261028-companion-wall-pairs-1"></script>
   <script src="semantic-axes.js?v=20261028-companion-wall-pairs-1"></script>
   <script src="wall-occupancy.js?v=20261028-companion-wall-pairs-1"></script>
-  <script src="layer-explanations.js?v=20261028-companion-wall-pairs-1"></script>
-  <script src="cadcore.js?v=20261028-companion-wall-pairs-1"></script>
+  <script src="layer-explanations.js?v=20261104-no-length-equipment-corners-1"></script>
+  <script src="cadcore.js?v=20261104-embedded-cap-filter-1"></script>
   <script src="native-layers.js?v=20261021-layers-2"></script>
-  <script src="app.js?v=20261104-ipad-file-picker-1"></script>
+  <script src="app.js?v=20261104-no-length-equipment-corners-1"></script>
 </body>
 </html>
