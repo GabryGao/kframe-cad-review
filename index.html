@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>K-Frame CAD Review · K型フレームCADレビュー</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css?v=20261028-wall-joints-connected-1">
+  <link rel="stylesheet" href="theme-neutral.css?v=20260925-neutral-1">
+  <link rel="stylesheet" href="guided-flow.css?v=20261021-layers-2">
+</head>
+<body class="guided">
+  <a class="skip-link" href="#main-content">Skip to content / 本文へ</a>
+  <header class="topbar">
+    <div class="brand-mark" aria-hidden="true">KF</div>
+    <div class="brand-copy"><strong>K-Frame CAD Review</strong><span>K型フレームCADレビュー</span></div>
+    <nav class="header-links" aria-label="Site / サイト"><button type="button" data-go="0">About <small>このツールについて</small></button><button type="button" data-go="1">Open drawing <small>図面を開く</small></button></nav>
+    <div class="local-badge"><span>Local processing</span><small>ローカル処理</small></div>
+  </header>
+
+  <div class="app-shell">
+    <main class="workspace" id="main-content">
+      <section class="flow-page welcome-page" data-page="0" aria-labelledby="welcome-title">
+        <div class="welcome-hero">
+          <h1 id="welcome-title" tabindex="-1">From drawings<br>to wall positions.</h1>
+          <p class="welcome-ja">図面から、壁の位置を読み解く。</p>
+          <p class="welcome-description">Find the walls. See the evidence.<br class="desktop-break"> Share which axis, and from where to where.</p>
+          <p class="welcome-description-ja">壁の位置を単線で表示し、元図と照合。<br class="desktop-break">「どの軸の、どこからどこまで」を、人にも次のAIにも。</p>
+          <div class="welcome-actions"><button class="button primary" type="button" data-go="1">Start analysis <span>解析を始める</span></button><a href="#how-it-works">How it works / 使い方を見る</a></div>
+          <p class="welcome-formats">ASCII DXF &amp; DWG · On-device processing<br>ASCII DXF・DWG対応 · ファイルは端末内で処理</p>
+        </div>
+        <section class="intro-how" id="how-it-works" aria-labelledby="how-title">
+          <h2 id="how-title">From drawing to clear evidence.<span>図面から、判断の根拠まで。</span></h2>
+          <ol class="intro-sequence">
+            <li><span class="intro-number">01</span><div><h3>Open your drawing</h3><p class="intro-ja">図面を選ぶ</p><p>Choose a DXF or DWG. No layer setup is required.<br>DXF・DWGを選択。手動でのレイヤー指定は不要です。</p></div></li>
+            <li><span class="intro-number">02</span><div><h3>See what was found</h3><p class="intro-ja">結果と理由を見る</p><p>Read each layer's role and score, with the selected layer highlighted.<br>各レイヤーの内容・スコア・理由とハイライトを表示します。</p></div></li>
+            <li><span class="intro-number">03</span><div><h3>Share the wall positions</h3><p class="intro-ja">壁の配置情報を渡す</p><p>Which axis, from where to where: readable TXT, simple JSON, or a single-line image.<br>どの軸の、どこからどこまで壁があるか。TXT・簡潔なJSON・単線画像で出力します。</p></div></li>
+          </ol>
+          <p class="intro-limits">An experimental geometry-based tool, not a trained AI model or structural approval system. Structural-model save/reload, wall loads and load transfer are outside this review.<br>実験段階の形状ルール解析です。学習済みAI・耐力判定・構造設計の承認を行うものではありません。構造モデルの保存・再読込み、壁荷重、荷重伝達は別確認です。</p>
+        </section>
+      </section>
+
+      <nav id="flow-progress" class="flow-progress" aria-label="Analysis progress / 解析の手順" hidden>
+        <ol><li><button type="button" data-go="1" data-flow-step="1"><span>01</span><strong>Choose a drawing<small>図面を選ぶ</small></strong></button></li><li><button type="button" data-go="2" data-flow-step="2" data-needs-result disabled><span>02</span><strong>Understand the result<small>結果と理由を見る</small></strong></button></li><li><button type="button" data-go="3" data-flow-step="3" data-needs-result disabled><span>03</span><strong>Export results<small>結果を保存する</small></strong></button></li></ol>
+      </nav>
+      <header class="workspace-head" id="flow-heading" hidden><div><p class="sr-only" id="step-label">Step 1 of 3 / 全3ステップ中1</p><h1 id="page-title" tabindex="-1">Choose a drawing</h1><p id="page-subtitle">Open a DXF or DWG to begin. / DXF・DWGを選んで始めます。</p></div></header>
+      <div id="message" class="message" hidden role="alert"></div>
+
+      <section class="flow-page upload-page" data-page="1" aria-labelledby="page-title" hidden>
+        <div class="upload-target" id="upload-drop-zone">
+          <svg class="upload-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M24 31V8m-8 8 8-8 8 8M10 28v12h28V28" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <h2>Your drawing is the starting point.</h2><p>図面をここにドラッグするか、ファイルを選択してください。</p>
+          <button class="button primary" id="open-file-button" data-import-control type="button">Choose a file <span>ファイルを選択</span></button>
+          <button class="button secondary" id="cancel-import" type="button" hidden>Cancel import <span>読込を中止</span></button>
+          <input id="file-input" type="file" accept=".dxf,.dwg" aria-label="Choose a DXF or DWG / DXF・DWGを選択">
+          <p class="upload-help">ASCII DXF or DWG · Analyzed automatically after opening<br>選択後に自動解析します。レイヤーの手動指定・承認は不要です。</p>
+          <p class="upload-help">PDF recognition is not yet supported. Use the original CAD DXF or DWG.<br>PDFの壁認識は未対応です。元のCADのDXF・DWGを使用してください。</p>
+          <p id="step-file" class="loaded-file">No drawing selected / 図面未選択</p>
+        </div>
+        <div class="example-options"><h3>Want to start with an example? <span>手元に図面がない場合</span></h3><div class="file-actions"><button class="button secondary" id="provided-drawing-button" data-import-control type="button" hidden>Local DXF example <span>端末内のDXF</span></button><button class="button secondary" id="provided-dwg-button" data-import-control type="button" hidden>Local DWG example <span>端末内のDWG</span></button><button class="button secondary" id="sample-button" data-import-control type="button">Built-in demo <span>説明用サンプル</span></button></div></div>
+        <details class="flow-disclosure"><summary>Supported files &amp; limitations / 対応形式と注意点</summary><div class="disclosure-content"><p>DWG is converted on this device. Binary DXF must first be saved as ASCII DXF. Blocks, curves and advanced CAD objects may not be fully represented.<br>DWGは端末内で変換します。バイナリDXFはASCII DXFに変換してください。ブロック・曲線・高度なCAD要素は完全には対応していません。</p><p>Physical scale and structural safety are not verified.<br>図面の実寸倍率・構造安全性は未確認です。</p></div></details>
+        <footer class="flow-footer"><button class="button secondary" type="button" data-go="0">Back to introduction <span>紹介へ戻る</span></button><button class="button secondary" type="button" data-go="2" data-needs-result disabled>Return to loaded result <span>読込済みの結果へ</span></button></footer>
+      </section>
+
+      <section class="flow-page results-page" data-page="2" aria-labelledby="page-title" hidden>
+      <nav class="result-nav" aria-label="Analysis results / 解析結果">
+        <button type="button" data-reveal="native-layers">Original layers / 元のレイヤー</button>
+        <button type="button" data-reveal="axis-review">Reference axes &amp; evidence / 基準軸と根拠</button>
+        <button type="button" data-reveal="all-layers">Explain every Layer / 全レイヤーの説明</button>
+        <button type="button" data-reveal="viewer-details">Inspect the drawing / 図面を拡大</button>
+        <button type="button" data-go="3" data-needs-result disabled>Go to export / 出力へ</button>
+      </nav>
+      <section class="scope-toolbar" aria-label="Shared preview and export scope / 表示・出力の共通範囲">
+      <section class="drawing-scope" id="drawing-scope" hidden>
+        <label for="view-scope">View &amp; export area / 表示・出力範囲 <select id="view-scope"><option value="main">Main drawing / 主図面</option></select></label>
+        <p id="view-note"></p>
+        <details><summary id="import-summary">Import & scale notes / 読込・尺度の注意</summary><div id="import-note"></div></details>
+      </section>
+      </section>
+
+      <section id="native-layers" class="native-layers" aria-labelledby="native-layers-title">
+        <div class="native-heading"><div><h2 id="native-layers-title">First, see the original layers.</h2><p>まず、元のレイヤーを分けて見る。</p></div><p id="native-layer-count"></p></div>
+        <p class="native-intro">Recognized wall-source Layers are shown in red; other Layers retain their original CAD colors. Short edges, outlines and openings are kept; nothing is joined or converted to a centerline here.<br>認識済みの壁源レイヤーは赤、その他は元のCAD色で表示します。短線・輪郭・開口を保ち、この表示では接続や中心線化を行いません。</p>
+        <div class="native-toolbar">
+          <label for="native-fit-mode">Drawing range / 表示範囲<select id="native-fit-mode"><option value="area">Current area / 選択中の領域</option><option value="visible">Fit visible layers / 表示レイヤー全体</option><option value="all">Whole source drawing / 原図全体</option></select></label>
+          <div class="native-view-actions"><button id="native-zoom-in" type="button" aria-label="Zoom layer drawing in / レイヤー図を拡大">＋</button><button id="native-zoom-out" type="button" aria-label="Zoom layer drawing out / レイヤー図を縮小">−</button><button id="native-fit" type="button">Fit / 全体表示</button></div>
+          <label class="native-text-toggle"><input id="native-show-text" type="checkbox" checked> Text / 文字</label>
+        </div>
+        <div class="native-canvas-wrap"><canvas id="native-layer-canvas" aria-label="Original DXF geometry with recognized wall-source Layers in red; use the layer list below to hide or isolate layers / 認識済み壁源レイヤーを赤で表示したDXF図。下の一覧で表示を切り替えます"></canvas><p id="native-empty" hidden>No visible geometry. Select a layer below or change the drawing range.<br>表示する形状がありません。下のレイヤーを選ぶか、表示範囲を変更してください。</p></div>
+        <p id="native-visible-summary" class="native-summary" aria-live="polite"></p>
+        <p class="native-help">Drag to pan; use + / − to zoom. Layer switches affect this preview only, not the wall result or export.<br>ドラッグで移動、＋／−で拡大縮小。レイヤー切替はこのプレビューだけに反映され、壁の判定・出力は変わりません。</p>
+        <div class="native-list-tools"><label for="native-search">Find a layer / レイヤーを検索<input id="native-search" type="search" placeholder="Layer name / レイヤー名" autocomplete="off"></label><button id="native-show-all" type="button">Show all / 全表示</button><button id="native-hide-all" type="button">Hide all / 全非表示</button></div>
+        <div id="native-layer-list" class="native-layer-list" role="group" aria-label="Layer visibility / レイヤーの表示切替"></div>
+        <details class="native-limitations"><summary>Display coverage &amp; limitations / 表示の対応範囲と注意</summary><p>Names and object counts come from the file, including empty declared layers. Block contents use their own layers, or inherit the insertion layer when on layer 0. Curves are sampled for display; fonts, text layout and CAD line styles may differ. Tiny text is hidden until zoomed in. Unsupported objects are listed below, never turned into wall lines.<br>名前・要素数は元ファイルの情報です（空の定義済みレイヤーも表示）。ブロック内の0層は挿入先の層を継承し、他は元の層を保持します。曲線は表示用に分割します。フォント・文字配置・CAD線種は異なる場合があり、小さい文字は拡大時に表示します。未対応要素は下記に記録し、壁線として代用しません。</p><p id="native-omissions"></p></details>
+      </section>
+
+      <section class="layer-ai-section" aria-labelledby="layer-ai-title">
+        <div class="layer-ai-heading">
+          <div><h2 id="layer-ai-title">Where are the walls?</h2><p>壁は、どの軸のどの区間にあるか</p></div>
+          <p>Select a blue wall or a table row to see its source and reason.<br>青い壁線・一覧の行を選ぶと、元線と判断理由が連動します。承認操作は不要です。</p>
+        </div>
+        <div class="layer-inspection-bar">
+          <p id="inspected-layer-label">No Layer loaded / レイヤー未読込</p>
+          <button id="show-selected-layer" type="button" disabled>View automatic selection / 自動選択を表示</button>
+        </div>
+        <label for="result-view" class="result-view-control">Result view / 結果の表示<select id="result-view"><option value="wall-lines">Wall lines only / 壁線のみ</option><option value="coverage">Source coverage / 原線の確認</option></select></label>
+        <div class="layer-comparison">
+          <figure><figcaption><strong>Recognized wall sources on original</strong><span>元図上の認識済み壁源</span></figcaption><canvas id="layer-context-canvas" aria-label="Original drawing with every recognized wall-source Layer highlighted red / 元図上で認識済みの全壁源レイヤーを赤く表示"></canvas><p>Red = every recognized wall-source Layer · Cyan = inspected non-wall Layer · Gray = other geometry<br>赤＝認識済みの全壁源レイヤー・水色＝確認中の非壁レイヤー・灰色＝その他</p></figure>
+          <figure><figcaption><strong>Walls as 2D lines</strong><span>壁を2Dの線で表す</span></figcaption><canvas id="wall-result-canvas" aria-label="Wall candidates as blue 2D lines; source coverage view adds unresolved intervals / 青い2D線は壁候補・原線確認では未確定区間も表示"></canvas><p id="wall-output-caption"></p></figure>
+        </div>
+        <section id="wall-position-workbench" class="position-workbench" aria-labelledby="position-title">
+          <div class="position-heading"><h3 id="position-title">Axis + from + to <span>軸・始点・終点</span></h3><p id="position-summary"></p></div>
+          <p class="position-help">Distances are measured from each axis origin in drawing units. Generated names are not original grid labels. Select a row to highlight the same wall in both drawings.<br>距離は各軸の原点からの図面単位です。生成名は原図の通り名ではありません。行を選ぶと、左右の同じ壁を強調します。</p>
+          <div class="position-layout"><div>
+            <div class="table-scroll position-table-scroll"><table><thead><tr><th>Wall / 壁</th><th>Axis / 軸</th><th>From → to / 始点 → 終点</th></tr></thead><tbody id="position-rows"></tbody></table></div>
+            <div class="position-paging"><button id="position-prev" type="button">Previous / 前へ</button><span id="position-page" aria-live="polite"></span><button id="position-next" type="button">Next / 次へ</button></div>
+          </div><aside id="position-selection" class="position-selection" aria-live="polite"><p>Select a wall / 壁を選択してください</p></aside></div>
+        </section>
+        <div class="coverage-review">
+          <p id="coverage-status" role="status"></p>
+          <details class="flow-disclosure"><summary>Unresolved source lines &amp; reasons / 未確定の原線と理由</summary>
+          <label class="coverage-toggle"><input id="show-unresolved" type="checkbox" checked> In source coverage: show unresolved lines / 原線確認で未確定線を表示</label>
+          <p class="coverage-legend"><span>Red = all recognized source wall outlines; blue = wall references / 赤＝認識した全壁輪郭線、青＝壁基準線</span><span>Source coverage: thin blue = explained detail; amber dashed = unresolved or recorded short omission / 原線確認：細い青＝説明済みの細部、橙の破線＝未確定または短壁省略</span></p>
+          <ul id="coverage-reasons"></ul>
+          <details class="flow-disclosure"><summary>Why are these lines unresolved? / 未確定になった理由</summary><p>The 12 longest unresolved intervals in the current area. All intervals and source IDs are included in review JSON.<br>表示領域内の長い未確定区間から12件を表示。全区間と元線IDは確認JSONに含まれます。</p><div class="table-scroll"><table><thead><tr><th>Source line / 元線</th><th>Reason / 理由</th></tr></thead><tbody id="coverage-examples"></tbody></table></div></details>
+          </details>
+        </div>
+        <p class="layer-table-help">Every recognized wall-source Layer uses the same area and scale on both sides. Inspecting a non-wall Layer changes only the left view.<br>認識済みの壁源レイヤーは左右で同じ領域・尺度を使います。非壁レイヤーの確認は左図のみを変更します。</p>
+        <details class="flow-disclosure" id="layer-evidence"><summary>Why these Layers? / このレイヤーを選んだ理由</summary><div id="layer-ai-report" class="layer-ai-report" aria-live="polite"></div><div id="layer-detail" class="layer-detail" data-active-layer=""><strong>The selected Layer is explained here automatically.</strong><span>自動選択したレイヤーの内容と根拠をここに表示します。</span></div></details>
+        <p class="layer-method-note">Explainable geometry rules, not a trained AI model. Scores are uncalibrated evidence, not measured accuracy. Wall thickness, room structure and load-bearing capacity are not certified.<br>学習済みAIではなく形状ルールによる説明です。スコアは根拠の強さで、正解率ではありません。実寸壁厚・部屋構成・耐力は未確認です。</p>
+        <details class="flow-disclosure" id="all-layers"><summary>What does every Layer contain? / 全レイヤーの内容・理由<span id="layer-list-count">Open a drawing / 図面を開いてください</span></summary><div class="disclosure-content">
+        <div class="layer-table-heading"><h3 id="layer-table-title">Layer-by-Layer explanation / レイヤー別の説明</h3></div>
+        <p class="layer-table-help">Every parsed, populated Layer is listed below. “View” changes the highlight only, never the automatic output.<br>解析した全ての非空レイヤーを表示します。「表示」はハイライトの切替だけで、自動出力の対象は変更しません。</p>
+        <div class="table-scroll layer-table-scroll"><table><thead><tr><th>Layer / レイヤー</th><th>Contents & meaning<br><small>内容・推定される役割</small></th><th>Confidence score<br><small>信頼度スコア</small></th><th>Evidence & decision<br><small>根拠・選択理由</small></th></tr></thead><tbody id="layer-table"><tr><td colspan="4">No data / データなし</td></tr></tbody></table></div>
+        </div></details>
+      </section>
+
+      <details class="flow-disclosure axis-review" id="axis-review"><summary>Axis geometry &amp; detailed evidence / 軸の幾何情報・詳細な根拠<span id="axis-count">Open a drawing / 図面を開いてください</span></summary>
+        <div class="disclosure-content">
+          <p>A line stands for a wall candidate. Simple TXT / JSON contain axis intervals; source geometry and reasons are in the detailed review exports. No 3D model is required.<br>1本の線は壁候補です。簡潔なTXT・JSONには軸と区間を、詳細な確認出力には元線と判断理由を含めます。3Dモデルは不要です。</p>
+          <p id="grid-summary" aria-live="polite">Existing X/Y grid labels are used when their geometry can be matched. Between Y4 and Y5, an auxiliary line may be named Y4A; otherwise a SYS name is generated. No wall is moved.<br>原図のX・Y通り芯符号と線が対応できれば参照します。Y4とY5の間にはY4Aなどの補助名を、参照できなければSYS名を生成します。壁の座標は変更しません。</p>
+          <div class="axis-controls"><label for="axis-select">Reference axis / 基準軸<select id="axis-select" disabled></select></label><div><button id="axis-prev" class="button secondary" type="button" disabled>Previous / 前へ</button><button id="axis-next" class="button secondary" type="button" disabled>Next / 次へ</button></div></div>
+          <div class="axis-layout"><figure><canvas id="axis-canvas" aria-label="Wall candidate, source grid references and generated auxiliary name / 壁候補・原図の通り芯参照・生成した補助軸名"></canvas><figcaption>Blue: wall reference · Dark dashed: coincident reference · Cyan: source edges · Purple dotted: matched source grid. Connected source boundaries may be simplified into one reference; unsupported gaps remain.<br>青：壁基準線・濃い破線：同位置の基準線・水色：元線・紫の点線：対応した原図の通り芯。連続する原線は単一の基準線に簡略化する場合があります。根拠のない隙間はつなぎません。</figcaption></figure><div id="axis-detail" aria-live="polite"></div></div>
+          <p>Offsets use drawing units: wall coordinate minus grid coordinate (+X for vertical lines, +Y for horizontal lines). Grid matching currently supports top-level text and horizontal/vertical lines, not blocks or rotated grids.<br>距離は図面単位の「壁座標−通り芯座標」です（縦線は＋X方向、横線は＋Y方向）。通り芯読取は直接記録された文字と水平・垂直線に限定し、ブロック内・回転した通り芯には未対応です。</p>
+          <h3>Related axes / 他の軸との関係</h3><ul id="axis-relations"></ul>
+          <p id="axis-limit-note"></p>
+          <p>Wall-derived geometric candidates, not verified building grid axes or installation locations. Columns, beams, openings, floor assignments and existing K-frames are not established as objects.<br>壁から求めた形状上の候補です。正式な通り芯・設置位置ではありません。柱・梁・開口・階・既存Kフレームの物体認識は未確定です。</p>
+        </div>
+      </details>
+
+      <details class="flow-disclosure" id="pipeline-details"><summary>Four-stage comparison / 4段階の比較を見る</summary>
+      <section class="pipeline-section" aria-labelledby="pipeline-title">
+        <div class="pipeline-heading">
+          <div>
+            <p class="eyebrow">FROM CAD TO STRUCTURAL INTELLIGENCE</p>
+            <h2 id="pipeline-title">Four-stage CAD analysis <span>4段階CAD解析</span></h2>
+          </div>
+          <p>One synchronized view from source drawing to clean structural output.<br>原図から構造用のクリーンDXFまでを同時に確認できます。</p>
+        </div>
+        <div class="stage-grid">
+          <article class="stage-card original-stage">
+            <header><span>01</span><div><strong>Original CAD Drawing</strong><small>元のCAD図面</small></div></header>
+            <div class="stage-canvas-wrap"><canvas class="stage-canvas" id="stage-original"></canvas><p class="stage-placeholder">Load a floor plan<br>平面図を読み込む</p></div>
+            <footer id="stage-original-meta">Source entities / 原図要素 —</footer>
+          </article>
+          <article class="stage-card wall-stage">
+            <header><span>02</span><div><strong>Wall Detection</strong><small>壁の自動検出</small></div></header>
+            <div class="stage-canvas-wrap"><canvas class="stage-canvas" id="stage-walls"></canvas><p class="stage-placeholder">Wall outlines + references<br>壁輪郭線＋壁基準線</p></div>
+            <footer id="stage-walls-meta">Detected walls / 検出壁 —</footer>
+          </article>
+          <article class="stage-card candidate-stage">
+            <header><span>03</span><div><strong>K-Frame Candidates</strong><small>K型フレーム候補</small></div></header>
+            <div class="stage-canvas-wrap"><canvas class="stage-canvas" id="stage-candidates"></canvas><p class="stage-placeholder">Placement candidates<br>配置候補</p></div>
+            <footer id="stage-candidates-meta">Candidates / 候補 —</footer>
+          </article>
+          <article class="stage-card clean-stage">
+            <header><span>04</span><div><strong>Clean DXF Output</strong><small>クリーンDXF出力</small></div></header>
+            <div class="stage-canvas-wrap"><canvas class="stage-canvas" id="stage-clean"></canvas><p class="stage-placeholder">Connected wall lines<br>接続済み壁線</p></div>
+            <footer id="stage-clean-meta">Connected WALL output / 接続済み壁線出力</footer>
+          </article>
+        </div>
+        <div class="pipeline-legend" aria-label="Pipeline colors">
+          <span><i class="swatch original"></i>Original / 原図</span>
+          <span><i class="swatch wall"></i>Wall outline + reference / 壁輪郭線＋基準線</span>
+          <span><i class="swatch kframe"></i>K-frame candidate / K型候補</span>
+        </div>
+      </section>
+      </details>
+
+      <details class="flow-disclosure" id="viewer-details"><summary>Large drawing view / 図面を大きく見る</summary><div class="disclosure-content">
+
+      <section class="drawing-card">
+        <div class="toolbar" aria-label="Drawing controls">
+          <div class="toolbar-group"><button type="button" id="zoom-in">Zoom in <small>拡大</small></button><button type="button" id="zoom-out">Zoom out <small>縮小</small></button><button type="button" id="fit-view">Fit <small>全体表示</small></button></div>
+          <div class="legend">
+            <label><input id="show-original" type="checkbox" checked><i class="swatch original"></i>Original <small>原図</small></label>
+            <label><input id="show-wall" type="checkbox" checked><i class="swatch wall"></i>Walls: outline + reference <small>壁：輪郭線＋基準線</small></label>
+            <label><input id="show-kframe" type="checkbox" checked><i class="swatch kframe"></i>Placement candidate <small>配置候補</small></label>
+            <label><input id="show-existing-braces" type="checkbox"><i class="swatch brace"></i>Existing brace <small>既存筋違</small></label>
+            <label><input id="show-layer" type="checkbox" checked><i class="swatch inspected"></i>Inspected Layer <small>確認中のレイヤー</small></label>
+          </div>
+        </div>
+        <div class="canvas-wrap" id="canvas-wrap">
+          <canvas id="drawing-canvas"></canvas>
+          <div class="empty-state" id="empty-state"><strong>Open a DWG or ASCII DXF to begin</strong><span>DWG・ASCII DXFを読み込んで開始</span><p>DWG converts locally in your browser. Binary DXF still requires conversion.<br>DWGはブラウザ内で変換します。バイナリDXFは事前変換が必要です。</p></div>
+        </div>
+      </section>
+      </div></details>
+
+      <details class="flow-disclosure"><summary>Drawing information / 図面の基本情報</summary>
+      <section class="info-grid">
+        <article class="info-card"><header><strong>Drawing Information</strong><span>図面の基本情報</span></header><dl id="drawing-info"><div><dt>Status / 状態</dt><dd>No drawing / 未読込</dd></div></dl></article>
+      </section>
+      </details>
+
+      <details class="flow-disclosure" id="geometry-options"><summary>Advanced geometry settings / 詳細な形状設定</summary><div class="disclosure-content">
+        <div class="analysis-note case-policy-note"><strong>Case-specific input policy / 本案件専用の入力条件</strong><p>Normal walls: thickness ≥100 mm. Wall spans ≤200 mm are omitted after continuous CAD fragments are merged. Thin PS enclosure walls require explicit, side-by-side manual evidence; a PS label alone does not accept them.</p><p>通常壁は100mm以上。連続するCAD分割片を統合した後、200mm以下の壁長を省略します。100mm未満のPS囲いは、PS文字だけで自動採用せず、各辺の根拠を手動確認します。他案件の一般基準ではありません。</p></div>
+        <p>Automatic analysis has already used these case defaults.<br>本案件の初期値による自動解析は完了しています。</p>
+        <div class="parameter-grid">
+          <label>Omit at or below <small>この長さ以下を省略</small><input id="min-wall-length" type="number" min="200" step="10" value="200"><em>mm</em></label>
+          <label>K-frame clear span <small>K型の必要長</small><input id="kframe-length" type="number" min="1" step="100" value="1400"><em>mm</em></label>
+          <label>Wall thickness min <small>最小壁厚（100mmを含む）</small><input id="pair-min" type="number" min="100" step="10" value="100"><em>mm</em></label>
+          <label>Wall thickness max <small>最大壁厚</small><input id="pair-max" type="number" min="1" step="10" value="450"><em>mm</em></label>
+          <label class="pair-toggle">Paired edges only <small>双線のみ（片側線は壁芯未確認）</small><input id="require-pair" type="checkbox" checked></label>
+        </div>
+        <button id="detect-button" class="button secondary" type="button" disabled>Recalculate parameters <span>設定値で再計算</span></button>
+        <p>Case-specific review values, not a universal design standard or structural approval criteria.<br>本案件専用の確認値であり、一般設計基準・構造承認値ではありません。</p>
+      </div></details>
+      <details class="flow-disclosure candidate-details"><summary>Optional K-frame geometry / K型候補（補助）</summary><div class="disclosure-content">
+      <div class="review-summary" id="review-summary"><strong>No placement candidates yet.</strong><span>配置候補はまだありません。</span></div>
+      <div class="candidate-list" id="candidate-list"></div>
+      <section class="existing-braces" id="existing-braces">
+        <strong>Existing K-brace check</strong><span>既存K型筋違の補助確認</span>
+        <p id="existing-brace-count">No existing K-shaped brace detected. / 既存K型筋違は未検出です。</p>
+      </section>
+      <div class="analysis-note"><strong>Structural safety note / 構造安全上の注意</strong><p>Red spans are geometric candidates only. Physical scale, load-bearing walls and openings are not verified. Not an installation approval.</p><p>赤線は形状による候補です。実寸倍率・耐力壁・開口は未確認です。配置承認ではなく、最終配置には構造検討が必要です。</p></div>
+      </div></details>
+      <footer class="flow-footer"><button class="button secondary" type="button" data-go="1">Choose another drawing <span>別の図面を選ぶ</span></button><div><p>No approval needed. Continue to download.<br>承認操作は不要です。出力画面へ進みます。</p><button class="button primary" type="button" data-go="3" data-needs-result disabled>Next: export results <span>次へ：結果の保存</span></button></div></footer>
+      </section>
+
+      <section class="flow-page export-page" data-page="3" aria-labelledby="page-title" hidden>
+        <label class="export-scope-label" for="export-scope">View &amp; export area / 表示・出力範囲 <select id="export-scope"></select></label>
+        <div class="export-overview"><div class="review-head"><div><strong id="export-file-name">Wall positions</strong><span>抽出した青い壁線</span></div><b id="review-count">0</b></div><p id="export-summary">Only the displayed blue wall lines are included in the primary JSON.<br>主JSONには表示中の青い壁線だけを出力します。</p><canvas id="export-preview" aria-label="Wall-only output preview / 壁のみの出力プレビュー"></canvas><p class="preview-note">Preview, blue-line JSON and single-line images use the same selected area. Crossing lines remain whole; no endpoints are invented.<br>プレビュー・青い壁線JSON・単線画像は同じ範囲です。境界を横切る線は全区間を保持し、端点を新しく作りません。</p></div>
+        <h2>Blue line coordinates + axes <span>青い壁線座標・軸区間</span></h2>
+        <p>The primary JSON lists direct start/end coordinates for every blue wall reference and connector. Red source outlines, wall thickness and contour points are excluded. TXT keeps the readable axis/interval view; images use the same blue lines as JSON.<br>主JSONは青い壁基準線と接続線の始点・終点座標を直接列挙します。赤い元輪郭線・壁厚・輪郭点は含みません。TXTは読みやすい軸・区間形式を保持し、画像はJSONと同じ青い線を使用します。</p>
+        <div class="primary-downloads"><button id="export-text" class="button primary" type="button" disabled>Wall positions (.txt) <span>人が読む壁配置テキスト</span></button>
+        <button id="export-handoff" class="button secondary" type="button" disabled>Blue wall lines (.json) <span>青い壁線だけの始点・終点座標</span></button>
+        <button id="export-png" class="button secondary" type="button" disabled>Single-line image (.png) <span>壁の単線画像を保存</span></button>
+        </div>
+        <p id="export-coverage-note" class="coverage-export-note"></p>
+        <details class="flow-disclosure"><summary>Preview the intervals / 軸と区間の一覧を見る</summary><div class="disclosure-content">
+          <p id="occupancy-summary"></p>
+          <p>From / to are signed distances along an axis, in drawing units. Axis origins and directions are defined in both files so another tool can reconstruct the lines. Original labels are used when detected; generated names are explicitly marked. No axis is structurally verified.<br>始点・終点は軸の原点からの符号付き距離（図面単位）です。再現に必要な軸の原点・方向も両ファイルで定義します。図面の通り名を検出できた場合は使用し、自動生成名は区別します。構造上の通り芯と確認したものではありません。</p>
+          <div class="table-scroll"><table><thead><tr><th>Axis / 軸</th><th>Area / 領域</th><th>From / 始点</th><th>To / 終点</th></tr></thead><tbody id="occupancy-rows"></tbody></table></div>
+        </div></details>
+        <section id="download-panel" class="download-panel" aria-labelledby="download-title" hidden>
+          <h3 id="download-title">Your file is ready / ファイルを生成しました</h3>
+          <p id="download-name"></p><p id="download-status" role="status" aria-live="polite"></p>
+          <a id="download-link" class="button secondary" download>Save file / ファイルを保存</a>
+          <img id="download-image" alt="Generated wall-only PNG: solid single lines / 生成した壁の実線・単線PNG" hidden style="width:100%;max-height:480px;object-fit:contain;margin-top:20px">
+          <details id="download-alternative" class="flow-disclosure"><summary>Download blocked? Copy the file text / 保存できない場合はテキストをコピー</summary>
+            <p>Save as a UTF-8 plain-text file with the name above, not a rich-text document. This contains the same generated report or data.<br>上記の名前でUTF-8のプレーンテキストとして保存してください。生成したレポート・データと同じ内容です。</p>
+            <label for="download-text">File content / ファイル内容</label><textarea id="download-text" readonly rows="8" spellcheck="false"></textarea>
+            <button id="copy-download" class="button secondary" type="button">Copy file text <span>ファイル内容をコピー</span></button>
+          </details>
+        </section>
+        <p class="export-caution">These are geometric wall candidates, not verified load-bearing walls. Structural-model save/reload, floor/roof/member integrity, wall loads and load transfer were not performed.<br>形状から抽出した壁候補であり、耐力壁と確定したものではありません。構造モデルの保存・再読込み、床・屋根・部材保持、壁荷重、荷重伝達は未実施です。</p>
+        <details class="flow-disclosure"><summary>CAD &amp; detailed diagnostics / CAD・詳細な診断データ</summary><div class="disclosure-content review-actions"><p>Detailed reports and CAD exports below cover the full drawing. Only the single-line SVG uses the selected area.<br>以下の詳細レポート・CAD出力は全図が対象です。単線SVGのみ、選択中の領域を使用します。</p>
+        <button id="export-svg" class="button secondary" type="button" disabled>Single-line image (.svg) <span>拡大できる壁の単線画像</span></button>
+        <button id="export-walls" class="button secondary" type="button" disabled>Connected wall-line DXF <span>原線根拠で接続した壁線DXF</span></button>
+        <button id="export-coverage" class="button secondary" type="button" disabled>Download wall-source review DXF <span>全壁輪郭線を含む確認DXF</span></button>
+        <button id="export-diagnostic-text" class="button secondary" type="button" disabled>Detailed report (.txt) <span>レイヤー選択の理由・詳細レポート</span></button>
+        <button id="export-json" class="button secondary" type="button" disabled>Detailed review (.json) <span>赤い元輪郭線と根拠を含む診断JSON</span></button>
+        <p>These diagnostic files retain red source outlines, evidence and detailed geometry. They are separate from the blue-line-only JSON above.<br>診断ファイルには赤い元輪郭線・根拠・詳細形状を保持します。上の青い壁線だけのJSONとは別の出力です。</p>
+        <button id="export-dxf" class="button secondary" type="button" disabled>Export candidate DXF <span>候補DXFを出力</span></button>
+        <p>Includes optional K-frame geometry candidates, not approved installation locations.<br>K型の形状候補を含みます。設置承認ではありません。</p>
+        <button id="export-layer" class="button secondary" type="button" disabled>Export recognized wall-source lines <span>認識済みの全壁源線を出力</span></button>
+        <p>Includes the primary extraction Layer and geometrically verified companion wall Layers. Dimension and unrelated frame Layers stay excluded.<br>主抽出レイヤーと形状確認済みの補助壁源レイヤーを含み、寸法線と無関係な枠線は除外します。</p>
+        <button id="export-converted" class="button secondary" type="button" disabled>Save converted DXF <span>DWG変換DXFを保存</span></button>
+        </div></details>
+        <footer class="flow-footer"><button class="button secondary" type="button" data-go="2">Back to explanations <span>説明に戻る</span></button><button class="button secondary" type="button" data-go="1">Analyze another drawing <span>別の図面を解析</span></button></footer>
+      </section>
+      <footer class="site-footer"><span>K-Frame CAD Review · Local processing / ローカル処理</span><a href="vendor/libredwg/NOTICE.md" target="_blank" rel="noopener">Open-source notices / ライセンス</a><button type="button" data-go="0">About this tool / このツールについて</button></footer>
+      <noscript><p>This tool needs JavaScript enabled for local CAD analysis.<br>CAD解析にはJavaScriptを有効にしてください。</p></noscript>
+    </main>
+  </div>
+
+  <script src="segment-topology.js?v=20261028-companion-wall-pairs-1"></script>
+  <script src="layer-intelligence.js?v=20261028-companion-wall-pairs-1"></script>
+  <script src="grid-references.js?v=20261028-companion-wall-pairs-1"></script>
+  <script src="semantic-axes.js?v=20261028-companion-wall-pairs-1"></script>
+  <script src="wall-occupancy.js?v=20261028-companion-wall-pairs-1"></script>
+  <script src="layer-explanations.js?v=20261028-companion-wall-pairs-1"></script>
+  <script src="cadcore.js?v=20261028-companion-wall-pairs-1"></script>
+  <script src="native-layers.js?v=20261021-layers-2"></script>
+  <script src="app.js?v=20261028-companion-wall-pairs-1"></script>
+</body>
+</html>
