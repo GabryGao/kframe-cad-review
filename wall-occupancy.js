@@ -49,6 +49,7 @@
       links[walls.at(-1).id] = a.id;
     }
     const wallLines = buildWallLines(wallOutputSegments, {axes, walls});
+    const wallRanges = buildLogicalWallRanges(axes, walls);
     const recognitionStatus = assessment.supported === false ? 'unsupported'
       : walls.length ? 'candidates-extracted' : 'no-walls-extracted';
     const unresolved = recognitionStatus === 'candidates-extracted' && model.readiness?.coverage !== 'unknown' && Array.isArray(model.unresolvedSourceIntervals)
@@ -60,13 +61,13 @@
         physicalScaleVerified: model.coordinateSystem?.physicalScaleVerified === true},
       convention: 'point(s) = axis.origin + s * axis.direction; from/to are signed distances in drawing units. Only source-supported wall-boundary continuity may join paired-edge omissions; other gaps are preserved.',
       wallLineConvention: 'wallLines contains only the displayed blue wall output. start/end are direct source-drawing XY coordinates; junction connectors are explicit records.',
-      axes, walls, wallLines,
+      axes, walls, wallRanges, wallLines,
       quality: {method: 'deterministic-geometry-baseline', interpretation: 'wall-candidates',
         recognitionStatus, reason: assessment.supported === false ? String(assessment.reasonCode || 'wall-extraction-failed') : null,
         coverage: omitted || omittedSourceIntervals || unresolved > 0 ? 'partial' : unresolved === null ? 'unknown' : 'accounted-not-validated',
         unresolvedIntervalCount: unresolved, omittedWallCount: omitted,omittedSourceIntervalCount:omittedSourceIntervals,
         ...continuityCounts(model.axes || [], new Set(Object.values(links))),
-        ...wallLineCounts(wallLines),
+        ...wallLineCounts(wallLines),logicalWallRangeCount:wallRanges.length,
         singleEdgeReferenceIds:singleEdgeIds(model,links),
         unresolvedCountBasis: 'raw paired-edge diagnostics before reference reconstruction; not missing-wall count'},
       limitations: [
@@ -106,6 +107,41 @@
       return {id:w.id,x1:a.origin.x+a.direction.x*w.from,y1:a.origin.y+a.direction.y*w.from,
         x2:a.origin.x+a.direction.x*w.to,y2:a.origin.y+a.direction.y*w.to};
     });
+  }
+
+  function buildLogicalWallRanges(axes, walls) {
+    const eps=1e-6,byAxis=new Map(axes.map(axis=>[axis.id,axis])),groups=new Map();
+    for(const wall of walls) {
+      const axis=byAxis.get(wall.axisId);if(!axis)continue;
+      const key=JSON.stringify([axis.areaId,axis.origin,axis.direction]);
+      if(!groups.has(key))groups.set(key,{axis,spans:[]});
+      groups.get(key).spans.push({from:Math.min(wall.from,wall.to),to:Math.max(wall.from,wall.to),wall});
+    }
+    const ranges=[];
+    for(const {axis,spans} of groups.values()) {
+      let current=null;
+      const push=()=>{
+        if(!current)return;
+        const start={x:cleanZero(axis.origin.x+axis.direction.x*current.from),
+          y:cleanZero(axis.origin.y+axis.direction.y*current.from)};
+        const end={x:cleanZero(axis.origin.x+axis.direction.x*current.to),
+          y:cleanZero(axis.origin.y+axis.direction.y*current.to)};
+        ranges.push({id:serial('R-',ranges.length+1),areaId:axis.areaId,start,end,length:current.to-current.from,
+          memberWallIds:[...current.memberWallIds],axisIds:[...current.axisIds]});
+      };
+      for(const span of spans.sort((a,b)=>a.from-b.from||a.to-b.to)) {
+        if(!current||span.from>current.to+eps) {
+          push();
+          current={from:span.from,to:span.to,memberWallIds:[span.wall.id],axisIds:new Set([span.wall.axisId])};
+        } else {
+          current.to=Math.max(current.to,span.to);
+          current.memberWallIds.push(span.wall.id);
+          current.axisIds.add(span.wall.axisId);
+        }
+      }
+      push();
+    }
+    return ranges;
   }
 
   function buildWallLines(wallOutputSegments, axisData) {
@@ -151,10 +187,12 @@
       data.walls=data.walls.filter(w=>keep.has(w.id));
       const used=new Set(data.walls.map(w=>w.axisId));
       data.axes=data.axes.filter(a=>used.has(a.id));
+      data.wallRanges=buildLogicalWallRanges(data.axes,data.walls);
       data.wallLines=data.wallLines.filter(line=>intersects({x1:line.start.x,y1:line.start.y,x2:line.end.x,y2:line.end.y},b));
       for(const id of Object.keys(links))if(!keep.has(id))delete links[id];
       Object.assign(data.quality,continuityCounts(model.axes || [],new Set(Object.values(links))));
       Object.assign(data.quality,wallLineCounts(data.wallLines));
+      data.quality.logicalWallRangeCount=data.wallRanges.length;
       data.quality.singleEdgeReferenceIds=singleEdgeIds(model,links);
       if(data.quality.unresolvedIntervalCount!==null) {
         const unresolved=model.unresolvedSourceIntervals;
@@ -190,7 +228,7 @@
       `Units: ${singleLine(data.units.label)} (code ${data.units.code})`,
       `実寸倍率 / Physical scale verified: ${data.units.physicalScaleVerified ? 'yes' : 'no'}`,
       `青い壁線 / Blue wall lines: ${data.wallLines?.length ?? data.walls.length} · 接続線 / Junction connectors: ${data.quality.junctionConnectorCount || 0}`,
-      `壁区間 / Wall intervals: ${data.walls.length} · 軸 / Axes: ${data.axes.length}`,
+      `壁区間 / Wall intervals: ${data.walls.length} · 連続壁範囲 / Logical wall ranges: ${data.wallRanges?.length || 0} · 軸 / Axes: ${data.axes.length}`,
       `出力範囲 / Output scope: ${singleLine(data.scope?.id || 'all')}`,
       '境界を横切る壁は全区間を保持します。出力できなかった壁の件数は全図の値です。',
       'Crossing wall intervals are kept whole. Omitted-wall count refers to the full drawing.',

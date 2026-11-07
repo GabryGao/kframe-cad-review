@@ -67,6 +67,7 @@
       if(reason) {omittedWalls.push({wallId:wall.id||`wall-${index+1}`,reason});continue;}
       const tangent={x:clean((g.x2-g.x1)/length),y:clean((g.y2-g.y1)/length)};
       const reconstructed=wall.centerlineBasis==='boundary-continuity-reference'&&wall.continuity;
+      const corrected=wall.referenceAxisCorrection&&Number.isFinite(wall.referenceAxisCorrection.distance);
       const contextPaired=wall.centerlineBasis==='context-paired-edges'&&supportIds.length>0;
       const paired=contextPaired||(ids.length>=2&&(wall.evidence||[]).includes('paired wall edges'));
       const sourceLayers=[...new Set(ids.map(id=>sourceMap.get(id).layer))];
@@ -92,14 +93,14 @@
         kind:'wall-reference-axis-candidate',status:'geometric-hypothesis',floorId:null,
         represents:{type:'wall',status:'candidate',wallId:wall.id||`wall-${index+1}`},
         referenceLine:{start:{x:g.x1,y:g.y1},end:{x:g.x2,y:g.y2},
-          relationship:reconstructed?'simplified-from-continuous-wall-boundaries':paired?'coincident-with-wall-centerline':'coincident-with-source-edge',isBuildingGrid:false,extensionPermitted:false},
+          relationship:reconstructed?'simplified-from-continuous-wall-boundaries':corrected?'corrected-continuous-wall-reference':paired?'coincident-with-wall-centerline':'coincident-with-source-edge',isBuildingGrid:false,extensionPermitted:false},
         start:{x:g.x1,y:g.y1},end:{x:g.x2,y:g.y2},length,
         directionDegrees:Math.atan2(tangent.y,tangent.x)*180/Math.PI,
         localFrame:{origin:{x:g.x1,y:g.y1},tangent,normal:{x:clean(-tangent.y),y:tangent.x},
           formula:'point(s, offset) = origin + s * tangent + offset * normal',sRange:[0,length]},
         thickness:Number.isFinite(wall.thickness)&&wall.thickness>0?wall.thickness:null,
         centerlineBasis:reconstructed?'boundary-continuity-reference':contextPaired?'context-paired-edges':paired?'paired-edges':'single-edge-hypothesis',
-        continuity,
+        continuity,referenceAxisCorrection:corrected?JSON.parse(JSON.stringify(wall.referenceAxisCorrection)):null,
         sourceSegmentIds:ids,sourceLayers,sourceIntervals,sourceIntervalFrame:'distance-from-exported-source-start',
         supportingSourceSegmentIds:supportIds,supportingSourceLayers:[...new Set(supportIds.map(id=>sourceMap.get(id)?.layer))],supportingSourceIntervals,
         confidence:{value:Number.isFinite(wall.confidence)&&wall.confidence>=0&&wall.confidence<=1?wall.confidence:null,
@@ -134,6 +135,11 @@
     const unresolved=payload.wallCoverage?.unresolved;
     const omittedSourceIntervals=payload.wallCoverage?.omitted||[];
     const gridReferences=Grid?Grid.build(axes,drawingEntities,payload.regions||[]):null;
+    const axisByWallId=new Map(axes.map(axis=>[axis.wallId,axis.id]));
+    const wallRanges=(payload.wallRanges||[]).map(range=>({id:range.id,start:{...range.start},end:{...range.end},
+      length:range.length,memberWallIds:[...(range.memberWallIds||[])],
+      memberAxisIds:[...new Set((range.memberWallIds||[]).map(id=>axisByWallId.get(id)).filter(Boolean))],
+      branchPoints:(range.branchPoints||[]).map(point=>({...point}))}));
     return {schema:'cad-axis-handoff/1.0',method:'deterministic-geometry-baseline',
       source:payload.source||{},selectedWallLayers:[...selected],
       coordinateSystem:{name:'source-drawing-XY',unitsCode:payload.source?.unitsCode||0,
@@ -141,7 +147,7 @@
         coordinatesRescaled:false,floorAssignmentVerified:false},
       layers:(payload.layerAnalysis?.layers||[]).map(l=>({name:l.name,roleHypothesis:l.role,
         ruleScore:l.confidence,scoreScale:[0,100],calibrated:false,selectedForWalls:selected.has(l.name)})),
-      axes,relations,relationAnalysis,gridReferences,
+      axes,wallRanges,relations,relationAnalysis,gridReferences,
       sourceGeometry:[...new Set([...usedSources,...supportSources])].map(id=>{const s=sourceMap.get(id);return {id,layer:s.layer,entityType:s.entityType||null,
         usage:usedSources.has(id)?'primary-wall-source':'supporting-evidence-only',
         geometry:{x1:s.x1,y1:s.y1,x2:s.x2,y2:s.y2}};}),

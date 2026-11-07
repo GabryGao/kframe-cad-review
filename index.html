@@ -214,12 +214,12 @@
       </details>
 
       <details class="flow-disclosure" id="geometry-options"><summary>Advanced geometry settings / 詳細な形状設定</summary><div class="disclosure-content">
-        <div class="analysis-note case-policy-note"><strong>Case-specific input policy / 本案件専用の入力条件</strong><p>Normal walls: thickness ≥100 mm. Wall length alone is not an exclusion criterion; short spans still require reliable paired outlines and connection evidence. Thin PS enclosure walls require explicit, side-by-side manual evidence; a PS label alone does not accept them.</p><p>通常壁は100mm以上。壁長だけを理由に省略せず、短い区間も双線輪郭と接続根拠で判断します。100mm未満のPS囲いは、PS文字だけで自動採用せず、各辺の根拠を手動確認します。他案件の一般基準ではありません。</p></div>
+        <div class="analysis-note case-policy-note"><strong>Case-specific input policy / 本案件専用の入力条件</strong><p>Wall recognition is not rejected by the 100–450 mm K-frame range. That range applies only to placement eligibility; wall pairing uses a separate geometric search tolerance. Short spans still require reliable paired outlines and connection evidence. PS enclosures are checked side by side and the shaft void is never filled.</p><p>壁認識はKフレーム用の100～450mm条件だけでは除外しません。この範囲は配置候補にのみ使用し、壁の双線探索は別の形状許容値で行います。短い区間も双線輪郭と接続根拠で判断し、PS囲いは各辺を個別に確認して内部空間を塗りつぶしません。他案件の一般基準ではありません。</p></div>
         <p>Automatic analysis has already used these case defaults.<br>本案件の初期値による自動解析は完了しています。</p>
         <div class="parameter-grid">
           <label>K-frame clear span <small>K型の必要長</small><input id="kframe-length" type="number" min="1" step="100" value="1400"><em>mm</em></label>
-          <label>Wall thickness min <small>最小壁厚（100mmを含む）</small><input id="pair-min" type="number" min="100" step="10" value="100"><em>mm</em></label>
-          <label>Wall thickness max <small>最大壁厚</small><input id="pair-max" type="number" min="1" step="10" value="450"><em>mm</em></label>
+          <label>K-frame thickness min <small>K型候補の最小壁厚（100mmを含む）</small><input id="pair-min" type="number" min="100" step="10" value="100"><em>mm</em></label>
+          <label>K-frame thickness max <small>K型候補の最大壁厚</small><input id="pair-max" type="number" min="1" step="10" value="450"><em>mm</em></label>
           <label class="pair-toggle">Paired edges only <small>双線のみ（片側線は壁芯未確認）</small><input id="require-pair" type="checkbox" checked></label>
         </div>
         <button id="detect-button" class="button secondary" type="button" disabled>Recalculate parameters <span>設定値で再計算</span></button>
@@ -241,7 +241,7 @@
         <label class="export-scope-label" for="export-scope">View &amp; export area / 表示・出力範囲 <select id="export-scope"></select></label>
         <div class="export-overview"><div class="review-head"><div><strong id="export-file-name">Wall positions</strong><span>抽出した青い壁線</span></div><b id="review-count">0</b></div><p id="export-summary">Only the displayed blue wall lines are included in the primary JSON.<br>主JSONには表示中の青い壁線だけを出力します。</p><canvas id="export-preview" aria-label="Wall-only output preview / 壁のみの出力プレビュー"></canvas><p class="preview-note">Preview, blue-line JSON and single-line images use the same selected area. Crossing lines remain whole; no endpoints are invented.<br>プレビュー・青い壁線JSON・単線画像は同じ範囲です。境界を横切る線は全区間を保持し、端点を新しく作りません。</p></div>
         <h2>Blue line coordinates + axes <span>青い壁線座標・軸区間</span></h2>
-        <p>The primary JSON lists direct start/end coordinates for every blue wall reference and connector. Red source outlines, wall thickness and contour points are excluded. TXT keeps the readable axis/interval view; images use the same blue lines as JSON.<br>主JSONは青い壁基準線と接続線の始点・終点座標を直接列挙します。赤い元輪郭線・壁厚・輪郭点は含みません。TXTは読みやすい軸・区間形式を保持し、画像はJSONと同じ青い線を使用します。</p>
+        <p>The primary JSON lists direct start/end coordinates for every blue wall reference and connector, plus merged start/end ranges for touching portions on the same corrected axis. Real openings remain separate ranges. Red source outlines, wall thickness and contour points are excluded.<br>主JSONは青い壁基準線・接続線の始点終点に加え、補正後の同一軸上で接する区間をまとめた連続壁範囲も出力します。実際の開口は別範囲のままです。赤い元輪郭線・壁厚・輪郭点は含みません。</p>
         <div class="primary-downloads"><button id="export-text" class="button primary" type="button" disabled>Wall positions (.txt) <span>人が読む壁配置テキスト</span></button>
         <button id="export-handoff" class="button secondary" type="button" disabled>Blue wall lines (.json) <span>青い壁線だけの始点・終点座標</span></button>
         <button id="export-png" class="button secondary" type="button" disabled>Single-line image (.png) <span>壁の単線画像を保存</span></button>
@@ -292,6 +292,7 @@
   <script src="layer-explanations.js?v=20261104-no-length-equipment-corners-1"></script>
   <script src="cadcore.js?v=20261104-embedded-cap-filter-1"></script>
   <script src="native-layers.js?v=20261021-layers-2"></script>
+  <script src="local-examples.js" data-local-only></script>
   <script src="app.js?v=20261104-no-length-equipment-corners-1"></script>
 </body>
 </html>

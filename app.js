@@ -116,11 +116,11 @@
       return false;
     }
     if (numberValue('pair-min') >= numberValue('pair-max')) {
-      setMessage('<strong>Minimum wall thickness must be smaller than the maximum.</strong><br>最小壁厚は最大壁厚より小さくしてください。');
+      setMessage('<strong>Minimum K-frame thickness must be smaller than the maximum.</strong><br>K型候補の最小壁厚は最大壁厚より小さくしてください。');
       return false;
     }
     if (state.inspection?.unitsCode === 4 && numberValue('pair-min') < 100) {
-      setMessage('<strong>This case uses a 100 mm inclusive wall-thickness minimum.</strong><br>本案件の通常壁は100mm以上です。100mm未満のPS囲いは自動採用せず、各辺を個別確認します。');
+      setMessage('<strong>This case uses a 100 mm inclusive K-frame thickness minimum.</strong><br>本案件ではK型候補を100mm以上とします。壁認識自体は厚さだけで除外しません。');
       return false;
     }
     return true;
@@ -162,11 +162,11 @@
       const reason = selectionReasonCopy(state.result.drawingAssessment.reasonCode);
       setMessage(`<strong>Wall extraction could not be completed.</strong><br>${escapeHtml(reason.en)} See each Layer's evidence below; the original drawing remains available.<br>壁の抽出を完了できませんでした。${escapeHtml(reason.ja)} 下のレイヤー別根拠と原図をご確認ください。`);
     } else if (!state.result.wallCenterlines.length) {
-      setMessage('<strong>No reliable wall centerlines were found.</strong><br>信頼できる壁中心線が見つかりません。壁厚や最小壁長を調整してください。');
+      setMessage('<strong>No reliable wall reference lines were found.</strong><br>信頼できる壁基準線が見つかりません。選択レイヤーと元の双線輪郭を確認してください。');
     } else if (!state.result.placementCandidates.length) {
-      setMessage('<strong>Walls were found, but none meet the placement threshold.</strong><br>壁は検出されましたが、配置条件を満たす候補はありません。K-frame clear spanを確認してください。', 'info');
+      setMessage('<strong>Walls were found, but none meet the K-frame placement threshold.</strong><br>壁は検出されましたが、K型配置条件を満たす候補はありません。必要長とK型候補の壁厚範囲を確認してください。', 'info');
     } else if (state.inspection.unitsCode !== 4 && !state.paramsDirty) {
-      setMessage('<strong>Relative-threshold mode is active for this drawing.</strong><br>Absolute wall-thickness rules currently use millimeters; other units use drawing-relative thresholds.<br>絶対壁厚ルールは現在mmに対応しています。他の単位・単位不明の図面では相対しきい値を使用します。', 'info');
+      setMessage('<strong>Relative K-frame thresholds are active for this drawing.</strong><br>Absolute K-frame thickness rules currently use millimeters; other units use drawing-relative thresholds.<br>K型候補の絶対壁厚条件は現在mmに対応しています。他の単位・単位不明の図面では相対しきい値を使用します。', 'info');
     } else {
       setMessage('', 'info');
     }
@@ -1165,7 +1165,7 @@
 
   function renderOccupancySummary() {
     const data=occupancyData(), axes=new Map(data.axes.map(a=>[a.id,a]));
-    $('occupancy-summary').textContent = `${scopeLabel()} · ${data.wallLines.length} blue lines (${data.quality.junctionConnectorCount || 0} connectors) · ${data.walls.length} wall intervals · ${data.axes.length} axes · units: ${data.units.label} / 青い壁線 ${data.wallLines.length}本（接続 ${data.quality.junctionConnectorCount || 0}本）・壁区間 ${data.walls.length}・軸 ${data.axes.length}本・単位 ${data.units.label}`;
+    $('occupancy-summary').textContent = `${scopeLabel()} · ${data.wallLines.length} blue lines (${data.quality.junctionConnectorCount || 0} connectors) · ${data.wallRanges.length} logical ranges · ${data.walls.length} source intervals · ${data.axes.length} axes · units: ${data.units.label} / 青い壁線 ${data.wallLines.length}本（接続 ${data.quality.junctionConnectorCount || 0}本）・連続壁範囲 ${data.wallRanges.length}・元区間 ${data.walls.length}・軸 ${data.axes.length}本・単位 ${data.units.label}`;
     $('occupancy-rows').innerHTML = data.walls.map(w=>{
       const a=axes.get(w.axisId);
       return `<tr><td>${escapeHtml(a.name)}<br><small>${a.nameSource==='drawing'?'Detected / 図面から検出':'Generated / 自動生成'} · ${escapeHtml(a.id)}</small></td><td>${escapeHtml(a.areaId)}</td><td>${escapeHtml(String(w.from))}</td><td>${escapeHtml(String(w.to))}</td></tr>`;

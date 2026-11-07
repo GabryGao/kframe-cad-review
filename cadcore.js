@@ -153,6 +153,38 @@
     };
   }
 
+  function pointAtDistance(segment, distance) {
+    const length = segLen(segment);
+    if (length <= 1e-9) return {x: segment.x1, y: segment.y1};
+    return {
+      x: segment.x1 + (segment.x2 - segment.x1) * distance / length,
+      y: segment.y1 + (segment.y2 - segment.y1) * distance / length,
+    };
+  }
+
+  function directlyConnects(points, segments, ignored, tolerance) {
+    return (segments || []).some(segment => {
+      if (!segment || ignored.has(segment.id)) return false;
+      const ends = [{x: segment.x1, y: segment.y1}, {x: segment.x2, y: segment.y2}];
+      return (Math.hypot(ends[0].x - points[0].x, ends[0].y - points[0].y) <= tolerance
+        && Math.hypot(ends[1].x - points[1].x, ends[1].y - points[1].y) <= tolerance)
+        || (Math.hypot(ends[1].x - points[0].x, ends[1].y - points[0].y) <= tolerance
+          && Math.hypot(ends[0].x - points[1].x, ends[0].y - points[1].y) <= tolerance);
+    });
+  }
+
+  function widePairHasClosedBoundaryEvidence(a, b, geometry, opts) {
+    const minimumAspect = Number.isFinite(opts.outOfPolicyPairAspect) ? opts.outOfPolicyPairAspect : 1.25;
+    if (geometry.overlap < geometry.thickness * minimumAspect) return false;
+    const tolerance = Math.max(1e-4, geometry.thickness * 0.01);
+    const aEnds = geometry.aInterval.map(distance => pointAtDistance(a, distance));
+    const bEnds = geometry.bInterval.map(distance => pointAtDistance(b, distance));
+    const ignored = new Set([a.id, b.id]);
+    const segments = opts.allSegments || [];
+    return directlyConnects([aEnds[0], bEnds[0]], segments, ignored, tolerance)
+      && directlyConnects([aEnds[1], bEnds[1]], segments, ignored, tolerance);
+  }
+
   function pairGeometry(a, b, opts) {
     const ax = a.x2 - a.x1, ay = a.y2 - a.y1;
     const alen = Math.hypot(ax, ay);
@@ -175,7 +207,7 @@
     if (overlap <= thickness * Math.max(0, Number(opts.minPairAspect) || 0) + 1e-6) return null;
     const offsetX = nx * signedDistance / 2;
     const offsetY = ny * signedDistance / 2;
-    return {
+    const geometry = {
       overlap,
       thickness,
       aInterval: [overlapStart, overlapEnd],
@@ -188,6 +220,11 @@
       x2: a.x1 + ux * overlapEnd + offsetX,
       y2: a.y1 + uy * overlapEnd + offsetY,
     };
+    const policyMin = Number.isFinite(opts.policyPairMin) ? opts.policyPairMin : opts.pairMin;
+    const policyMax = Number.isFinite(opts.policyPairMax) ? opts.policyPairMax : opts.pairMax;
+    geometry.outsidePolicy = thickness < policyMin - 1e-6 || thickness > policyMax + 1e-6;
+    if (thickness > policyMax + 1e-6 && !widePairHasClosedBoundaryEvidence(a, b, geometry, opts)) return null;
+    return geometry;
   }
 
   function looksLikeRepeatedPattern(segment, all, opts) {
@@ -196,7 +233,7 @@
     for (const other of all) {
       if (other === segment) continue;
       const relaxed = pairGeometry(segment, other, { ...opts, minWallLen: Math.min(opts.minWallLen, segLen(segment) * 0.7) });
-      if (relaxed) parallelNeighbours += 1;
+      if (relaxed && relaxed.thickness <= opts.policyPairMax + 1e-6) parallelNeighbours += 1;
       if (parallelNeighbours >= 5) return true;
     }
     return false;
@@ -216,8 +253,15 @@
     const millimeterDrawing = opts.unitsCode === 4;
     const settings = {
       minWallLen: opts.minWallLen != null ? opts.minWallLen : (millimeterDrawing ? 500 : ext.diag * 0.02),
-      pairMin: opts.pairMin != null ? opts.pairMin : (millimeterDrawing ? 60 : ext.diag * 0.003),
-      pairMax: opts.pairMax != null ? opts.pairMax : (millimeterDrawing ? 450 : ext.diag * 0.035),
+      pairMin: opts.recognitionPairMin != null ? opts.recognitionPairMin
+        : opts.pairMin != null ? opts.pairMin : (millimeterDrawing ? 60 : ext.diag * 0.003),
+      pairMax: opts.recognitionPairMax != null ? opts.recognitionPairMax
+        : opts.pairMax != null ? opts.pairMax : (millimeterDrawing ? 450 : ext.diag * 0.035),
+      policyPairMin: opts.policyPairMin != null ? opts.policyPairMin
+        : opts.pairMin != null ? opts.pairMin : (millimeterDrawing ? 60 : ext.diag * 0.003),
+      policyPairMax: opts.policyPairMax != null ? opts.policyPairMax
+        : opts.pairMax != null ? opts.pairMax : (millimeterDrawing ? 450 : ext.diag * 0.035),
+      outOfPolicyPairAspect: opts.outOfPolicyPairAspect != null ? opts.outOfPolicyPairAspect : 1.25,
       angleTolerance: opts.angleTolerance != null ? opts.angleTolerance : 5,
       minPairAspect: opts.minPairAspect != null ? opts.minPairAspect : 0,
       excludeAtOrBelowMinWallLen: !!opts.excludeAtOrBelowMinWallLen,
@@ -235,7 +279,7 @@
       if (noisy.has(normalized[i])) continue;
       for (let j = i + 1; j < normalized.length; j++) {
         if (noisy.has(normalized[j])) continue;
-        const geometry = pairGeometry(normalized[i], normalized[j], settings);
+        const geometry = pairGeometry(normalized[i], normalized[j], {...settings, allSegments: normalized});
         if (!geometry) continue;
         possiblePairs.push({
           i, j, geometry,
@@ -281,9 +325,12 @@
         sourceIntervals: [{id:a.id,span:pair.geometry.aInterval},{id:b.id,span:pair.geometry.bInterval}],
         layer: hasWallLayer ? (layerRole(a.layer) === "wall" ? a.layer : b.layer) : (a.layer || "0"),
         confidence: hasWallLayer ? 0.96 : 0.82,
-        evidence: opts.selectedWallLayer ? ["paired wall edges", "automatically selected wall layer"]
-          : hasWallLayer ? ["paired wall edges", "wall layer"] : ["paired wall edges"],
-        warnings: [],
+        evidence: [
+          ...(opts.selectedWallLayer ? ["paired wall edges", "automatically selected wall layer"]
+            : hasWallLayer ? ["paired wall edges", "wall layer"] : ["paired wall edges"]),
+          ...(pair.geometry.outsidePolicy ? ["wall geometry recognized independently of K-frame thickness policy"] : []),
+        ],
+        warnings: pair.geometry.outsidePolicy ? ["outside-kframe-thickness-policy"] : [],
       });
     }
     for (let i = 0; i < normalized.length; i++) {
@@ -313,7 +360,7 @@
       for (let i=0;i<all.length;i++) for (let j=i+1;j<all.length;j++) {
         const a=all[i], b=all[j];
         if (a.layer !== b.layer) continue;
-        const g=pairGeometry(a,b,{...settings,minWallLen:shortMin});
+        const g=pairGeometry(a,b,{...settings,minWallLen:shortMin,allSegments:all});
         if (!g || g.overlap >= settings.minWallLen || g.overlap < g.thickness * 0.75) continue;
         const compact=g.overlap<g.thickness*1.25;
         if(compact) {
@@ -490,7 +537,8 @@
     for(let i=0;i<pieces.length;i++)for(let j=i+1;j<pieces.length;j++) {
       const a=pieces[i],b=pieces[j];if(a.layer!==b.layer||a.id===b.id||compactLoops.has(a.id)||compactLoops.has(b.id))continue;
       const g=pairGeometry(a,b,{...minimumOptions,angleTolerance:0.1});
-      if(!g||g.overlap<g.thickness*0.75||!walls.some(w=>w.layer===a.layer&&Math.abs(w.thickness-g.thickness)<=Math.max(1,w.thickness*0.02)))continue;
+      if(!g||(g.outsidePolicy&&g.thickness<(opts.policyPairMin??opts.pairMin)-1e-6)||g.overlap<g.thickness*0.75
+        ||!walls.some(w=>w.layer===a.layer&&Math.abs(w.thickness-g.thickness)<=Math.max(1,w.thickness*0.02)))continue;
       const ux=(g.x2-g.x1)/g.overlap,uy=(g.y2-g.y1)/g.overlap;
       const capAt=(x,y)=>{
         // A cap is continuous geometry, not necessarily one CAD entity.
@@ -682,6 +730,178 @@
     return removeEmbeddedCrossSectionReferences(references);
   }
 
+  function wallReferenceWidth(wall) {
+    return Math.max(0, Number(wall && wall.thickness) || 0,
+      ...((wall && wall.continuity && wall.continuity.originalGeometries) || [])
+        .map(item => Number(item.thickness) || 0));
+  }
+
+  function correctWallReferenceAxes(segments, references) {
+    const eps = 1e-4, angleTolerance = Math.sin(Math.PI / 36);
+    const input = removeEmbeddedCrossSectionReferences(references);
+    const sourceMap = new Map((segments || []).filter(segment => segment && segment.id)
+      .map((segment, index) => normalizedSegment(segment, index)).map(segment => [segment.id, segment]));
+    const sourceIds = wall => [...new Set([...(wall.sourceSegmentIds || []), ...(wall.supportingSourceSegmentIds || [])])];
+    const endpoints = segment => [{x: segment.x1, y: segment.y1}, {x: segment.x2, y: segment.y2}];
+    const proposals = new Map();
+    const add = (index, item) => {
+      if (!proposals.has(index)) proposals.set(index, []);
+      proposals.get(index).push(item);
+    };
+    const perpendicularBranchAt = (previous, entry, source, sx, sy) => {
+      const transition = Math.max(0, Math.min(source.length, (previous.span[1] + entry.span[0]) / 2));
+      const point = {x: source.x1 + sx * transition, y: source.y1 + sy * transition};
+      const hostSign = Math.sign(previous.offset) || Math.sign(entry.offset);
+      const hostDepth = Math.max(previous.width, entry.width);
+      if (!hostSign) return false;
+      return input.some((candidate, candidateIndex) => {
+        if (candidateIndex === previous.index || candidateIndex === entry.index) return false;
+        const candidateLength = segLen(candidate), candidateWidth = wallReferenceWidth(candidate);
+        if (candidateLength <= eps || candidateWidth <= eps || sourceIds(candidate).length < 2) return false;
+        const ux = (candidate.x2 - candidate.x1) / candidateLength;
+        const uy = (candidate.y2 - candidate.y1) / candidateLength;
+        if (Math.abs(ux * sx + uy * sy) > angleTolerance) return false;
+        const tolerance = Math.max(2, candidateWidth * 0.01, hostDepth * 0.01);
+        if (pointSegmentDistance(point, candidate) > candidateWidth / 2 + tolerance) return false;
+        const signedDepths = endpoints(candidate).map(endpoint => (
+          -(endpoint.x - source.x1) * sy + (endpoint.y - source.y1) * sx
+        ) * hostSign);
+        return signedDepths.some(depth => depth < -tolerance || depth > hostDepth + tolerance);
+      });
+    };
+    for (const source of sourceMap.values()) {
+      const sx = (source.x2 - source.x1) / source.length, sy = (source.y2 - source.y1) / source.length;
+      const entries = input.map((wall, index) => {
+        if (!(wall.sourceSegmentIds || []).includes(source.id)) return null;
+        const length = segLen(wall), ux = (wall.x2 - wall.x1) / length, uy = (wall.y2 - wall.y1) / length;
+        if (Math.abs(ux * sy - uy * sx) > angleTolerance) return null;
+        const width = wallReferenceWidth(wall);
+        if (!width) return null;
+        const midpoint = {x: (wall.x1 + wall.x2) / 2, y: (wall.y1 + wall.y2) / 2};
+        const offset = -(midpoint.x - source.x1) * sy + (midpoint.y - source.y1) * sx;
+        const tolerance = Math.max(2, width * 0.01);
+        if (Math.abs(Math.abs(offset) - width / 2) > Math.max(tolerance, width * 0.05)) return null;
+        return {index, wall, width, offset, span: projectedInterval(source, wall)};
+      }).filter(Boolean).sort((a, b) => a.span[0] - b.span[0] || a.span[1] - b.span[1]);
+      const groups = [];
+      let group = [], hasGap = false, hasOffsetChange = false;
+      const flush = () => {
+        const alignContiguousSteps = !hasGap && hasOffsetChange;
+        if (group.length > 1 && (hasGap || alignContiguousSteps)) groups.push({members: group, alignContiguousSteps});
+        group = [];
+        hasGap = false;
+        hasOffsetChange = false;
+      };
+      for (const entry of entries) {
+        if (!group.length) {
+          group = [entry];
+          continue;
+        }
+        const previous = group.at(-1), gap = entry.span[0] - previous.span[1];
+        const width = Math.max(previous.width, entry.width), tolerance = Math.max(2, width * 0.01);
+        const sameSide = previous.offset * entry.offset > 0;
+        const compatibleOffset = Math.abs(previous.offset - entry.offset) <= width * 0.25 + tolerance;
+        const connected = gap <= width * 1.05 + tolerance && sameSide && (compatibleOffset || gap <= eps);
+        if (connected && !perpendicularBranchAt(previous, entry, source, sx, sy)) {
+          group.push(entry);
+          if (gap > eps) hasGap = true;
+          if (Math.abs(previous.offset - entry.offset) > tolerance) hasOffsetChange = true;
+        } else {
+          flush();
+          group = [entry];
+        }
+      }
+      flush();
+      for (const {members, alignContiguousSteps} of groups) {
+        const anchor = [...members].sort((a, b) => segLen(b.wall) - segLen(a.wall)
+          || String(a.wall.id).localeCompare(String(b.wall.id)))[0];
+        const score = members.reduce((sum, item) => sum + segLen(item.wall), 0);
+        for (const member of members) {
+          const delta = anchor.offset - member.offset;
+          const width = Math.max(anchor.width, member.width), tolerance = Math.max(2, width * 0.01);
+          if ((!alignContiguousSteps && Math.abs(delta) > width * 0.25 + tolerance)
+            || anchor.offset * member.offset <= 0 || Math.abs(anchor.offset) > member.width + tolerance) continue;
+          add(member.index, {score, dx: -sy * delta, dy: sx * delta, distance: Math.abs(delta),
+            sourceSegmentId: source.id, anchorWallId: anchor.wall.id});
+        }
+      }
+    }
+    return input.map((wall, index) => {
+      const options = (proposals.get(index) || []).sort((a, b) => b.score - a.score || a.distance - b.distance);
+      if (!options.length || options[0].distance <= eps) return {...wall};
+      const shift = options[0];
+      const correction = {distance: shift.distance, dx: shift.dx, dy: shift.dy,
+        sourceSegmentId: shift.sourceSegmentId, anchorWallId: shift.anchorWallId,
+        reason: 'continuous-wall-reference-correction'};
+      return {...wall, x1: wall.x1 + shift.dx, y1: wall.y1 + shift.dy,
+        x2: wall.x2 + shift.dx, y2: wall.y2 + shift.dy,
+        referenceAxisCorrection: correction, outputAxisShift: correction};
+    });
+  }
+
+  function deriveWallRanges(references) {
+    const eps = 1e-4, directionTolerance = 1e-6;
+    const groups = [];
+    for (const wall of references || []) {
+      const length = segLen(wall);
+      if (!Number.isFinite(length) || length <= eps) continue;
+      let ux = (wall.x2 - wall.x1) / length, uy = (wall.y2 - wall.y1) / length;
+      if (ux < 0 || (Math.abs(ux) <= directionTolerance && uy < 0)) {
+        ux = -ux;
+        uy = -uy;
+      }
+      const offset = -uy * wall.x1 + ux * wall.y1;
+      let group = groups.find(item => Math.abs(item.ux * uy - item.uy * ux) <= directionTolerance
+        && Math.abs(item.offset - offset) <= eps);
+      if (!group) {
+        group = {ux, uy, offset, spans: []};
+        groups.push(group);
+      }
+      const coordinates = [{x: wall.x1, y: wall.y1}, {x: wall.x2, y: wall.y2}]
+        .map(point => point.x * group.ux + point.y * group.uy).sort((a, b) => a - b);
+      group.spans.push({from: coordinates[0], to: coordinates[1], wall});
+    }
+    const ranges = [];
+    for (const group of groups) {
+      let current = null;
+      const origin = {x: -group.uy * group.offset, y: group.ux * group.offset};
+      const push = () => {
+        if (!current) return;
+        const start = {x: origin.x + group.ux * current.from, y: origin.y + group.uy * current.from};
+        const end = {x: origin.x + group.ux * current.to, y: origin.y + group.uy * current.to};
+        ranges.push({id: `wall-range-${ranges.length + 1}`, x1: start.x, y1: start.y, x2: end.x, y2: end.y,
+          start, end, length: current.to - current.from,
+          axis: {origin: {...origin}, direction: {x: group.ux, y: group.uy}},
+          memberWallIds: [...new Set(current.members.map(item => item.id).filter(Boolean))],
+          sourceSegmentIds: [...new Set(current.members.flatMap(item => item.sourceSegmentIds || []))],
+          branchPoints: []});
+      };
+      for (const span of group.spans.sort((a, b) => a.from - b.from || a.to - b.to)) {
+        if (!current || span.from > current.to + eps) {
+          push();
+          current = {from: span.from, to: span.to, members: [span.wall]};
+        } else {
+          current.to = Math.max(current.to, span.to);
+          current.members.push(span.wall);
+        }
+      }
+      push();
+    }
+    for (let i = 0; i < ranges.length; i++) for (let j = i + 1; j < ranges.length; j++) {
+      const a = ranges[i], b = ranges[j];
+      const ax = a.x2 - a.x1, ay = a.y2 - a.y1, bx = b.x2 - b.x1, by = b.y2 - b.y1;
+      const denominator = ax * by - ay * bx;
+      if (Math.abs(denominator) <= 1e-9) continue;
+      const dx = b.x1 - a.x1, dy = b.y1 - a.y1;
+      const ta = (dx * by - dy * bx) / denominator, tb = (dx * ay - dy * ax) / denominator;
+      if (ta < -eps || ta > 1 + eps || tb < -eps || tb > 1 + eps) continue;
+      const point = {x: a.x1 + ax * Math.max(0, Math.min(1, ta)), y: a.y1 + ay * Math.max(0, Math.min(1, ta))};
+      a.branchPoints.push({...point, otherRangeId: b.id});
+      b.branchPoints.push({...point, otherRangeId: a.id});
+    }
+    return ranges;
+  }
+
   function deriveWallOutputSegments(segments, references) {
     const eps=1e-4, angleTolerance=Math.sin(Math.PI/36);
     const sourceMap=new Map(segments.filter(s=>s&&s.id).map(s=>[s.id,normalizedSegment(s)]));
@@ -690,62 +910,7 @@
       ...(wall.continuity?.originalGeometries||[]).map(item=>Number(item.thickness)||0));
     const axisShift=wall=>Math.max(0,Number(wall.continuity?.maxAxisShift)||0);
     const sourceIds=wall=>[...new Set([...(wall.sourceSegmentIds||[]),...(wall.supportingSourceSegmentIds||[])])];
-    // Align short interrupted portions to the longest reference on one uninterrupted source boundary.
-    // The adjusted axis must stay inside every original wall strip; openings are still governed by the gap rules below.
-    const alignSharedBoundaryReferences=input=>{
-      const proposals=new Map(),add=(index,item)=>{if(!proposals.has(index))proposals.set(index,[]);proposals.get(index).push(item);};
-      for(const source of sourceMap.values()) {
-        const sx=(source.x2-source.x1)/source.length,sy=(source.y2-source.y1)/source.length;
-        const entries=input.map((wall,index)=>{
-          if(!(wall.sourceSegmentIds||[]).includes(source.id))return null;
-          const length=segLen(wall),ux=(wall.x2-wall.x1)/length,uy=(wall.y2-wall.y1)/length;
-          if(Math.abs(ux*sy-uy*sx)>angleTolerance)return null;
-          const width=thickness(wall);if(!width)return null;
-          const midpoint={x:(wall.x1+wall.x2)/2,y:(wall.y1+wall.y2)/2};
-          const offset=-(midpoint.x-source.x1)*sy+(midpoint.y-source.y1)*sx;
-          const tolerance=Math.max(2,width*.01);
-          if(Math.abs(Math.abs(offset)-width/2)>Math.max(tolerance,width*.05))return null;
-          return {index,wall,width,offset,span:projectedInterval(source,wall)};
-        }).filter(Boolean).sort((a,b)=>a.span[0]-b.span[0]||a.span[1]-b.span[1]);
-        const groups=[];let group=[],hasGap=false,hasOffsetChange=false;
-        const flush=()=>{
-          const shortStep=group.length>=3&&group.some(item=>segLen(item.wall)<=item.width+Math.max(2,item.width*.01));
-          const alignContiguousSteps=!hasGap&&hasOffsetChange&&shortStep;
-          if(group.length>1&&(hasGap||alignContiguousSteps))groups.push({members:group,alignContiguousSteps});
-          group=[];hasGap=false;hasOffsetChange=false;
-        };
-        for(const entry of entries) {
-          if(!group.length){group=[entry];continue;}
-          const previous=group.at(-1),gap=entry.span[0]-previous.span[1],width=Math.max(previous.width,entry.width),
-            tolerance=Math.max(2,width*.01),sameSide=previous.offset*entry.offset>0,
-            compatibleOffset=Math.abs(previous.offset-entry.offset)<=width*.25+tolerance;
-          if(gap<=width*1.05+tolerance&&sameSide&&(compatibleOffset||gap<=eps)){
-            group.push(entry);if(gap>eps)hasGap=true;
-            if(Math.abs(previous.offset-entry.offset)>tolerance)hasOffsetChange=true;
-          }
-          else {flush();group=[entry];}
-        }
-        flush();
-        for(const {members,alignContiguousSteps} of groups) {
-          const anchor=[...members].sort((a,b)=>segLen(b.wall)-segLen(a.wall)||String(a.wall.id).localeCompare(String(b.wall.id)))[0];
-          const score=members.reduce((sum,item)=>sum+segLen(item.wall),0);
-          for(const member of members) {
-            const delta=anchor.offset-member.offset,width=Math.max(anchor.width,member.width),tolerance=Math.max(2,width*.01);
-            if((!alignContiguousSteps&&Math.abs(delta)>width*.25+tolerance)
-              ||anchor.offset*member.offset<=0||Math.abs(anchor.offset)>member.width+tolerance)continue;
-            add(member.index,{score,dx:-sy*delta,dy:sx*delta,distance:Math.abs(delta),sourceSegmentId:source.id});
-          }
-        }
-      }
-      return input.map((wall,index)=>{
-        const options=(proposals.get(index)||[]).sort((a,b)=>b.score-a.score||a.distance-b.distance);
-        if(!options.length||options[0].distance<=eps)return {...wall};
-        const shift=options[0];
-        return {...wall,x1:wall.x1+shift.dx,y1:wall.y1+shift.dy,x2:wall.x2+shift.dx,y2:wall.y2+shift.dy,
-          outputAxisShift:{distance:shift.distance,dx:shift.dx,dy:shift.dy,sourceSegmentId:shift.sourceSegmentId}};
-      });
-    };
-    const walls=alignSharedBoundaryReferences(referenceWalls),endpointCandidates=walls.map(()=>[[],[]]);
+    const walls=correctWallReferenceAxes(segments,referenceWalls),endpointCandidates=walls.map(()=>[[],[]]);
     const endpoints=segment=>[{x:segment.x1,y:segment.y1},{x:segment.x2,y:segment.y2}];
     const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
     const sourceJunctionSupported=(a,b,point,radius)=>{
@@ -928,8 +1093,8 @@
         const offsetA=signedOffset(nearest.pointA),offsetB=signedOffset(nearest.pointB);
         return offsetA*offsetB>0&&Math.abs(offsetA)<=widthA+tolerance&&Math.abs(offsetB)<=widthB+tolerance;
       });
-      if(nearest&&(a.outputAxisShift||b.outputAxisShift)&&overlap<=tolerance&&longitudinalGap<=tolerance
-        &&along<=tolerance&&lateral>eps&&nearest.gap<=width*1.05+tolerance&&alignedTransitionSources.length
+      if(nearest&&(a.outputAxisShift||b.outputAxisShift)&&overlap<=tolerance&&longitudinalGap<=width*1.05+tolerance
+        &&along<=width*1.05+tolerance&&lateral>eps&&nearest.gap<=width*1.05+tolerance&&alignedTransitionSources.length
         &&!gapCovered(a,b,nearest.pointA,nearest.pointB,width)) {
         continuityCandidates.push({a,b,endA:nearest.endA,endB:nearest.endB,start:nearest.pointA,end:nearest.pointB,
           gap:nearest.gap,sharedSources:alignedTransitionSources,kind:'shared-source-aligned-transition',
@@ -1286,10 +1451,17 @@
     const millimeterDrawing = opts.unitsCode === 4;
     const kLen = opts.kLen != null ? opts.kLen : (millimeterDrawing ? 1400 : ext.diag * 0.08);
     const joinTolerance = opts.joinTolerance != null ? opts.joinTolerance : (millimeterDrawing ? 120 : ext.diag * 0.012);
+    const thicknessMinimum = Number.isFinite(opts.kframePairMin) ? opts.kframePairMin
+      : Number.isFinite(opts.pairMin) ? opts.pairMin : null;
+    const thicknessMaximum = Number.isFinite(opts.kframePairMax) ? opts.kframePairMax
+      : Number.isFinite(opts.pairMax) ? opts.pairMax : null;
     const candidates = [];
     for (const wall of wallList) {
       const clearSpan = Number.isFinite(wall.length) ? wall.length : segLen(wall);
       if (!Number.isFinite(clearSpan) || clearSpan < kLen) continue;
+      const wallThickness = Number(wall.thickness);
+      if (Number.isFinite(wallThickness) && ((thicknessMinimum != null && wallThickness < thicknessMinimum - 1e-6)
+        || (thicknessMaximum != null && wallThickness > thicknessMaximum + 1e-6))) continue;
       const evidence = wall.evidence || [];
       const warnings = [...(wall.warnings || [])];
       const reasons = [];
@@ -1297,6 +1469,7 @@
       const lengthScore = 20 + Math.min(10, Math.max(0, (clearSpan / kLen - 1) * 10));
       score += lengthScore;
       reasons.push(`clear span ${Math.round(clearSpan)}${millimeterDrawing ? " mm" : " drawing units"}`);
+      if (Number.isFinite(wallThickness)) reasons.push(`wall thickness ${Math.round(wallThickness)}${millimeterDrawing ? " mm" : " drawing units"} within K-frame policy`);
       if (evidence.includes("paired wall edges")) {
         score += 25;
         reasons.push("paired wall edges");
@@ -1397,7 +1570,8 @@
       .map((region, index) => ({ ...region, id: `region-${index + 1}` }));
   }
 
-  function detectPsReview(entities) {
+  function detectPsReview(entities, segments, wallReferences, options) {
+    const opts=options||{};
     const markerTypes=new Set(['TEXT','MTEXT','ATTRIB','ATTDEF']);
     const markers=(entities||[]).filter(entity=>markerTypes.has(entity.type)&&entity.text).flatMap((entity,index)=>{
       const normalized=String(entity.text).replace(/[Ｐｐ]/g,'P').replace(/[Ｓｓ]/g,'S').toUpperCase();
@@ -1407,11 +1581,54 @@
       return [{id:`ps-marker-${index+1}`,text:String(entity.text),layer:entity.layer||'0',
         point:Number.isFinite(x)&&Number.isFinite(y)?{x,y}:null}];
     });
-    return {status:markers.length?'manual-review-required':'not-found',markers,
+    if(!markers.length)return {status:'not-found',markers:[],enclosures:[],
       reviewUnit:'each enclosure side',automaticThinWallExceptionApplied:false,
-      note:markers.length
-        ?'PS labels were found. Each enclosure side, endpoint, connection and opening requires manual review before any wall thinner than the normal minimum can be accepted.'
-        :'No explicit PS label was found. No automatic thin-wall exception was applied.'};
+      note:'No explicit PS label was found. No automatic thin-wall exception was applied.'};
+    const ext=extentsOf(segments||[]),searchRadius=opts.unitsCode===4?3000:Math.max(1,ext.diag*.08);
+    const angleTolerance=Math.sin(Math.PI/36),sideNames=['left','right','bottom','top'];
+    const enclosures=markers.map(marker=>{
+      if(!marker.point)return {markerId:marker.id,sides:[],unresolvedSides:[...sideNames],voidPreserved:false};
+      const choices={left:[],right:[],bottom:[],top:[]};
+      for(const wall of wallReferences||[]) {
+        const length=segLen(wall),thickness=wallReferenceWidth(wall);
+        if(length<=1e-6||thickness<=0)continue;
+        const ux=(wall.x2-wall.x1)/length,uy=(wall.y2-wall.y1)/length;
+        const minx=Math.min(wall.x1,wall.x2),maxx=Math.max(wall.x1,wall.x2);
+        const miny=Math.min(wall.y1,wall.y2),maxy=Math.max(wall.y1,wall.y2);
+        const tolerance=Math.max(2,thickness*.05);
+        if(Math.abs(ux)>=1-angleTolerance&&marker.point.x>=minx-tolerance&&marker.point.x<=maxx+tolerance) {
+          const y=(wall.y1+wall.y2)/2,distance=Math.abs(y-marker.point.y);
+          if(distance<=searchRadius)choices[y<marker.point.y?'bottom':'top'].push({wall,distance,thickness});
+        } else if(Math.abs(uy)>=1-angleTolerance&&marker.point.y>=miny-tolerance&&marker.point.y<=maxy+tolerance) {
+          const x=(wall.x1+wall.x2)/2,distance=Math.abs(x-marker.point.x);
+          if(distance<=searchRadius)choices[x<marker.point.x?'left':'right'].push({wall,distance,thickness});
+        }
+      }
+      const sides=sideNames.flatMap(side=>{
+        const chosen=choices[side].sort((a,b)=>a.distance-b.distance||segLen(b.wall)-segLen(a.wall))[0];
+        if(!chosen)return [];
+        const wall=chosen.wall;
+        return [{side,wallId:wall.id,thickness:chosen.thickness,distanceFromMarker:chosen.distance,
+          geometry:{x1:wall.x1,y1:wall.y1,x2:wall.x2,y2:wall.y2},
+          sourceSegmentIds:[...new Set([...(wall.sourceSegmentIds||[]),...(wall.supportingSourceSegmentIds||[])])]}];
+      });
+      const unresolvedSides=sideNames.filter(side=>!sides.some(item=>item.side===side));
+      const side=(name)=>sides.find(item=>item.side===name);
+      const bounds=unresolvedSides.length?null:{
+        minx:(side('left').geometry.x1+side('left').geometry.x2)/2,
+        maxx:(side('right').geometry.x1+side('right').geometry.x2)/2,
+        miny:(side('bottom').geometry.y1+side('bottom').geometry.y2)/2,
+        maxy:(side('top').geometry.y1+side('top').geometry.y2)/2,
+      };
+      return {markerId:marker.id,markerPoint:{...marker.point},sides,unresolvedSides,
+        voidBounds:bounds,voidPreserved:unresolvedSides.length===0};
+    });
+    const complete=enclosures.every(enclosure=>enclosure.unresolvedSides.length===0);
+    return {status:complete?'enclosure-sides-recognized':'manual-review-required',markers,enclosures,
+      reviewUnit:'each enclosure side',automaticThinWallExceptionApplied:false,
+      note:complete
+        ?'Each PS enclosure side was identified as a separate paired wall reference. The shaft void remains empty; endpoints, openings and structural use still require review.'
+        :'PS labels were found, but one or more enclosure sides could not be identified. Do not fill the shaft void; review every side, endpoint, connection and opening.'};
   }
 
   function detectEquipmentOutlines(entities, segments, options) {
@@ -1487,15 +1704,22 @@
     const requirePair = !!opts.requirePair;
     const pairMin = opts.pairMin != null ? opts.pairMin : (millimeterDrawing ? 60 : ext.diag * 0.003);
     const pairMax = opts.pairMax != null ? opts.pairMax : (millimeterDrawing ? 450 : ext.diag * 0.035);
+    const recognitionPairMin = opts.recognitionPairMin != null ? opts.recognitionPairMin
+      : (millimeterDrawing ? Math.min(pairMin, 60) : pairMin * 0.5);
+    const recognitionPairMax = opts.recognitionPairMax != null ? opts.recognitionPairMax
+      : (millimeterDrawing ? Math.max(pairMax, 2000) : Math.max(pairMax, ext.diag * 0.08));
     const excludeAtOrBelowMinWallLen=!!opts.excludeAtOrBelowMinWallLen;
     const minPairAspect=opts.minPairAspect!=null?opts.minPairAspect:0;
-    const extractionOptions={minWallLen,pairMin,pairMax,minPairAspect,excludeAtOrBelowMinWallLen};
+    const extractionOptions={minWallLen,pairMin:recognitionPairMin,pairMax:recognitionPairMax,
+      policyPairMin:pairMin,policyPairMax:pairMax,outOfPolicyPairAspect:1.25,
+      minPairAspect,excludeAtOrBelowMinWallLen};
     const equipmentReview=detectEquipmentOutlines(ents,originalSegs,{unitsCode:opts.unitsCode||0});
     const equipmentSourceIds=new Set(equipmentReview.sourceSegmentIds),wallSourceSegs=originalSegs.filter(segment=>!equipmentSourceIds.has(segment.id));
 
     // All-layer geometry is optional diagnostics; the browser only extracts selected Layers.
     const rawWallCandidates = opts.includeDiagnostics === false ? [] : extractWallCenterlines(wallSourceSegs, {
-      ...extractionOptions, requirePair, unitsCode: opts.unitsCode || 0,
+      ...extractionOptions,pairMin,pairMax,policyPairMin:pairMin,policyPairMax:pairMax,
+      requirePair, unitsCode: opts.unitsCode || 0,
     });
     const rawPlacementCandidates = detectPlacementCandidates(rawWallCandidates, { ...opts, kLen, unitsCode: opts.unitsCode || 0 });
     const layerAnalysis = LayerAI
@@ -1531,7 +1755,9 @@
     ).filter(w=>w.centerlineBasis==='single-edge-hypothesis'&&!w.sourceSegmentIds.some(id=>represented.has(id))))
       .map((w,i)=>({...w,id:`reference-single-${i+1}`,sourceLayers:[w.layer]}));
     const supported = layerAnalysis.status === "selected" && selectedWallCandidates.length > 0;
-    const wallReferences = [...deriveWallReferences(wallSourceSegs,selectedWallCandidates),...(supported?singleReferences:[])];
+    const wallReferences = correctWallReferenceAxes(wallSourceSegs,
+      [...deriveWallReferences(wallSourceSegs,selectedWallCandidates),...(supported?singleReferences:[])]);
+    const wallRanges = deriveWallRanges(wallReferences);
     const wallOutputSegments = deriveWallOutputSegments(wallSourceSegs,wallReferences);
     const wallLayerAssessments = new Map((layerAnalysis.layers || []).map(layer => [layer.name, layer]));
     const wallBoundaryLayers = [...new Set([
@@ -1580,10 +1806,12 @@
     const kframeCandidates = placementCandidates;
     const kframe = placementCandidates;
     const plainWalls = wallCandidates;
-    const psReview=detectPsReview(ents);
+    const psReview=detectPsReview(ents,wallSourceSegs,wallReferences,{...opts,pairMin,pairMax});
     const casePolicy=opts.casePolicyId?{
       id:opts.casePolicyId,scope:'case-specific',measurementStatus:opts.casePolicyMeasurementStatus||'unknown',
-      wallThickness:{minimum:pairMin,inclusive:true,units:millimeterDrawing?'mm':'drawing-units',
+      wallRecognition:{kframeThicknessLimitApplied:false,recognitionSearch:{minimum:recognitionPairMin,maximum:recognitionPairMax},
+        widePairRequirement:'closed-boundary-evidence'},
+      wallThickness:{appliesTo:'kframe-eligibility',minimum:pairMin,maximum:pairMax,inclusive:true,units:millimeterDrawing?'mm':'drawing-units',
         psException:{allowedOnlyWithExplicitEvidence:true,automaticAcceptance:false,reviewStatus:psReview.status}},
       wallLength:excludeAtOrBelowMinWallLen
         ?{omitAtOrBelow:minWallLen,inclusive:true,omissionByLength:true,mergeContinuousSourceEntitiesBeforeFiltering:true}
@@ -1606,14 +1834,14 @@
     return {
       removedSegs, excludedSegs, originalSegs, keptSegs: originalSegs,
       walls: wallCandidates, wallCenterlines: wallCandidates, wallCandidates, plainWalls,
-      wallReferences, wallOutputSegments, wallBoundaryLayers, wallBoundarySegments,
+      wallReferences, wallRanges, wallOutputSegments, wallBoundaryLayers, wallBoundarySegments,
       rawWallCandidates, rawPlacementCandidates, drawingAssessment,
       layerAnalysis, selectedWallLayers,extractedWallLayers,
       wallCoverage,casePolicy,psReview,equipmentReview,structuralModelVerification,completionReview,
       placementCandidates, existingKBraces,
       kframe, kframeCandidates, extents: ext, viewAssessment,
       regions: drawingRegions(wallCandidates, Math.max(pairMax * 4, minWallLen * 3)),
-      used: { minWallLen, kLen, requirePair, pairMin, pairMax,minPairAspect,excludeAtOrBelowMinWallLen,
+      used: { minWallLen, kLen, requirePair, pairMin, pairMax,recognitionPairMin,recognitionPairMax,minPairAspect,excludeAtOrBelowMinWallLen,
         extractCompanionWallLayers:!!opts.extractCompanionWallLayers,
         casePolicyId:opts.casePolicyId||null,unitsCode: opts.unitsCode || 0 },
       stats: {
@@ -1622,6 +1850,7 @@
         candidateSegs: wallCandidates.length,
         originalSegs: originalSegs.length,
         wallSegs: wallCandidates.length,
+        wallRanges: wallRanges.length,
         wallOutputSegs: wallOutputSegments.length,
         wallJunctionSegs: wallOutputSegments.filter(segment=>segment.outputRole==='junction-connector').length,
         wallBoundarySegs: wallBoundarySegments.length,
@@ -1693,6 +1922,16 @@
         outputAxisShift: segment.outputAxisShift || null,
         geometry: { x1: segment.x1, y1: segment.y1, x2: segment.x2, y2: segment.y2 },
       })),
+      wallRanges: (result && result.wallRanges || []).map(range => ({
+        id: range.id,
+        start: {...range.start},
+        end: {...range.end},
+        length: range.length,
+        axis: range.axis ? JSON.parse(JSON.stringify(range.axis)) : null,
+        memberWallIds: [...(range.memberWallIds || [])],
+        sourceSegmentIds: [...(range.sourceSegmentIds || [])],
+        branchPoints: (range.branchPoints || []).map(point => ({...point})),
+      })),
       source: {
         fileName: fileName || "drawing.dxf",
         format: inspection && inspection.format || "unknown",
@@ -1704,8 +1943,12 @@
       parameters: result && result.used || {},
       shortOmissions: result && result.wallCoverage && result.wallCoverage.omitted || [],
       centerlineAdjustments: (result && (result.wallReferences || result.wallCenterlines) || [])
-        .filter(wall=>wall.continuity&&Number.isFinite(wall.continuity.maxAxisShift))
-        .map(wall=>({wallId:wall.id,maxAxisShift:wall.continuity.maxAxisShift,
+        .filter(wall=>(wall.continuity&&Number.isFinite(wall.continuity.maxAxisShift))
+          || Number.isFinite(wall.referenceAxisCorrection?.distance))
+        .map(wall=>({wallId:wall.id,
+          maxAxisShift:Number.isFinite(wall.referenceAxisCorrection?.distance)
+            ?wall.referenceAxisCorrection.distance:wall.continuity.maxAxisShift,
+          correction:wall.referenceAxisCorrection||null,
           basis:wall.centerlineBasis||'boundary-continuity-reference',withinSourceWall:'requires-source-review'})),
       wallCenterlines: (result && (result.wallReferences || result.wallCenterlines) || []).map((wall, index) => ({
         id: wall.id || `wall-${index + 1}`,
@@ -1719,6 +1962,7 @@
         sourceIntervals: wall.sourceIntervals || [],
         centerlineBasis: wall.centerlineBasis || null,
         continuity: wall.continuity || null,
+        referenceAxisCorrection: wall.referenceAxisCorrection || null,
         supportingSourceSegmentIds: wall.supportingSourceSegmentIds || [],
         supportingSourceLayers: wall.supportingSourceLayers || [],
         supportingSourceIntervals: wall.supportingSourceIntervals || [],
@@ -1918,7 +2162,7 @@
     return L.join("\n") + "\n";
   }
 
-  const api = { inspectDXF, parseDXF, segsOf, segLen, classify, extractWallCenterlines, recoverContextWallPairs, recoverCompanionWallLayerPairs, recoverResidualWallPairs, deriveWallReferences, deriveWallOutputSegments, reviewWallCoverage, segmentsInBounds, detectPsReview, detectEquipmentOutlines, detectPlacementCandidates, detectKFrames, layerRole, summarizeLayers, buildAnnotationData, buildDXF, buildSelectedLayerDXF, buildCoverageDXF, makeSampleDXF, extentsOf, REMOVE_TYPES };
+  const api = { inspectDXF, parseDXF, segsOf, segLen, classify, extractWallCenterlines, recoverContextWallPairs, recoverCompanionWallLayerPairs, recoverResidualWallPairs, deriveWallReferences, correctWallReferenceAxes, deriveWallRanges, deriveWallOutputSegments, reviewWallCoverage, segmentsInBounds, detectPsReview, detectEquipmentOutlines, detectPlacementCandidates, detectKFrames, layerRole, summarizeLayers, buildAnnotationData, buildDXF, buildSelectedLayerDXF, buildCoverageDXF, makeSampleDXF, extentsOf, REMOVE_TYPES };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.CADCORE = api;
 })(typeof window !== "undefined" ? window : globalThis);
